@@ -1,0 +1,4 @@
+build/
+build-sanitize/
+*.dSYM/
+__pycache__/
