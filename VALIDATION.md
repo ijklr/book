@@ -1,5 +1,36 @@
 # Validation of the book
 
+## Expanded teaching examples — October 13, 2026
+
+Expanded all thirteen chapters in response to the request for deeper explanations and teaching examples. Added worked state traces, prediction questions, and folded reviews covering shell result channels, allocation and borrowing, partial writes, pathname replacement, inherited offsets, pipe references, signal timing, mapping windows, condition-variable wakeups, frame assembly, output reservations, controlled debugging, and prefix-table construction. The opening method now derives a queue invariant from accepted and delivered sequences. Appendix F adds complete overlapping-retry and latency-population examples.
+
+The new output-reservation example distinguishes pending bytes from retained buffer capacity: a partial write can reduce the first without releasing the second. The queue proof also connects delivery order to the accepted sequence, rather than relying only on valid numeric bounds.
+
+Validation completed:
+
+- Ran the shell channel/status and rename/shared-offset examples, and the Chapter 12 Python investigation, checking their predicted output.
+- Temporary C harnesses checked buffer growth, no-growth, allocation failure, short writes, interruption, stale `errno`, fatal failure, and zero progress against the unchanged implementations. The buffer and copier harnesses also passed AddressSanitizer and UndefinedBehaviorSanitizer. A separate matcher harness checked prefix tables and the three-feed callback/state trace.
+- Independently checked frame bytes, mapping-window arithmetic, output reservations, retry ownership, and latency/deadline calculations. A small queue model checked the sequence invariant at 264 states across capacities 1–4 and operation histories up to eight events; this bounded check supplements the written argument.
+- `make book` rebuilt both editions. Structural checks confirmed source/render agreement, thirteen chapters, six appendices, nine assessment tasks, 15 exact C listings, 56 disclosure sections, 57 resolving internal links, 203 unique IDs, balanced HTML, valid local links, and consistent columns in all 58 tables.
+- `git diff --check` passed. Runnable example, capstone, test, and builder sources and the personal workbook match the snapshot taken before this teaching pass.
+
+The full behavioral suite was not repeated because its source and runnable programs are unchanged; the preceding revision records its passing run. The new model traces are teaching examples, not hardware measurements. Linux execution, advanced lab implementations, and visual browser/print behavior remain outside these checks.
+
+## Editorial and technical revision — October 12, 2026
+
+Revised the preface, reasoning method, all thirteen instructional chapters, and all six appendices. Preserved the first-principles approach and existing manuscript changes while tightening repeated guidance, defining terms where they are introduced, and adding concrete traces for queue state, argument vectors, pipe EOF, framed messages, partial I/O, matcher fallback, and memory reservations. The advanced study route now connects assessment gaps to specific units.
+
+Checked explanations against the runnable source and primary documentation. Clarifications include `fread` versus `read` short results, overlapping exit-status meanings, symbolic-link traversal policy, wait-status decoding, mapping stability, thread argument lifetimes, callback ordering, and the limits of per-wait timeouts. The parser assessment now specifies callback restrictions and distinguishable error codes for its allocation-failure retry contract; it remains intentionally defective exercise code. The retry assessment now requires finite resource limits. Employer descriptions retain their explicitly dated October 3 source review.
+
+Validation completed:
+
+- `make test`: matcher checks and all 21 Python behavioral test groups passed, including loopback networking.
+- Focused chapter checks covered argument parsing, buffer capacity, binary copying, and filesystem branches. New protocol bytes, matcher traces, checksums, reservation calculations, and evaluation denominators were checked independently.
+- `make book` rebuilt both editions. Structural checks confirmed source/render agreement, thirteen chapters, six appendices, nine assessment tasks, 15 exact included C listings, 39 disclosure sections, 57 resolving internal HTML links, 189 unique IDs, balanced HTML, valid local links, and consistent columns in all 46 tables.
+- `git diff --check` passed. The C examples, capstone, test sources, builder, and personal `WORKBOOK.md` are unchanged from the start of this revision.
+
+This was a documentation revision; sanitizer execution was not repeated. The earlier instrumented-run evidence retains its original scope. Linux execution, advanced lab implementations, and browser rendering or printing were not newly validated. Structural HTML checks do not establish visual layout or print behavior.
+
 ## First-principles editorial review — October 4, 2026
 
 Reviewed the central arguments in all thirteen chapters and Appendix F against six explicit criteria: outcomes before mechanisms, grounded premises, necessary state or work, simpler alternatives, concrete challenges, and revision under a changed assumption. The explanations meet that instructional standard within their stated scope. [FIRST_PRINCIPLES_REVIEW.md](FIRST_PRINCIPLES_REVIEW.md) records chapter-level evidence and the limits of this assessment; it is not a claim of personal endorsement by Elon Musk.

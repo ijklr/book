@@ -1,8 +1,6 @@
 # Appendix D — Build toward demanding engineering roles
 
-The first thirteen chapters develop user-space systems programming through derivation, prediction, counterexamples, and reference implementations. Completing them is useful evidence of progress, but inspecting a supplied solution does not establish that you can design, implement, debug, and explain an unfamiliar system independently. Use the opening reasoning method to produce your own argument before comparing it with the reference.
-
-This appendix makes the learning standard more demanding. It identifies gaps in the current text, specifies substantial work to close them, and defines evidence you can collect. Appendix E gives an independent assessment you can start today. The advanced units below are a curriculum and project specifications; their complete implementations are not supplied. [Appendix F](#appendix-f--from-c-systems-to-ai-infrastructure) works through selected bridges from this foundation to AI infrastructure.
+The next step after the thirteen chapters is to build a system whose solution is not supplied. Choose a role family, attempt a relevant assessment in Appendix E, and use the result to select an advanced unit below. Each unit specifies a project and evidence of completion. [Appendix F](#appendix-f--from-c-systems-to-ai-infrastructure) supplies worked arguments for the AI infrastructure extensions.
 
 ## Calibrate the target
 
@@ -35,7 +33,7 @@ Choose one extension first. GPU programming and research mathematics belong wher
 
 ## What the current book does and does not establish
 
-The book teaches real resource-management issues. Its copier handles partial I/O, its process examples collect children, and its matcher handles arbitrary chunking. The revised chapters make you derive their state and challenge their assumptions before revealing code. The complete implementations still give substantial guidance; independent work must test whether you can transfer the reasoning to a larger problem.
+The copier handles partial I/O, the process examples collect child status, and the matcher handles arbitrary chunking. Each chapter asks you to derive the state and challenge its assumptions before revealing code. The table below identifies the additional work needed to apply those ideas independently at a larger scale.
 
 | Current material | What needs substantially more work |
 | --- | --- |
@@ -51,13 +49,13 @@ The book teaches real resource-management issues. Its copier handles partial I/O
 | A correctly functioning program | Deployment, actionable monitoring, compatibility, incident recovery, and rollback under ongoing traffic |
 | Exact byte-level results | Numerical tolerances, data leakage, statistical uncertainty, and evaluation validity for ML-oriented roles |
 
-Finding prose easy to follow and solving these harder problems are different observations. Start with the assessment before deciding how much of the foundation to skip. You may have mastered a topic, or you may recognize a good explanation without being able to construct it yet. Both are normal; they call for different next steps.
+Attempt the assessment before deciding which foundation chapters to skip. Following an explanation and constructing one independently exercise different skills.
 
 ## Use three forms of evidence
 
 For each major skill, collect a **working artifact**, a **reasoned explanation**, and an **independent demonstration**.
 
-A working artifact includes the implementation, build instructions, tests, and a precise contract. A reasoned explanation states ownership, invariants, failure behavior, and complexity or measured costs. An independent demonstration asks you to solve a variation without the reference implementation visible. These provide complementary evidence: code alone can hide misunderstandings, while an eloquent explanation can hide a lack of implementation practice.
+A working artifact includes the implementation, build instructions, tests, and contract. The explanation accounts for ownership, invariants, failure, and costs. The independent demonstration changes a requirement while the reference implementation is closed. Together they show what you can build, justify, and adapt.
 
 Use four progress labels:
 
@@ -183,8 +181,20 @@ Begin with Appendix E's shared core, E1–E6. Use its first task for one focused
 
 Proceed in three passes: first repair foundational gaps identified by the core assessment; next complete one language bridge and one Unit 8 project; then add a role-specific extension and repeat independent practice. Appendix F supplies intermediate worked examples between the chapters and those larger projects. An inference or research direction adds ML study at this stage; a backend direction can instead deepen distributed systems and operations.
 
+Use the failed contract or missing evidence to choose the next unit:
+
+| Gap exposed by the assessment | Study next | Evidence to bring back |
+| --- | --- | --- |
+| Task 1: ordering, duplicates, or hidden work | Unit 1: algorithms | A corrected invariant and a bound that counts examined input |
+| Task 2: ownership or incremental parsing | Chapters 2 and 10, then Unit 2 | A minimal failing input and a repair that preserves allocation-failure behavior |
+| Task 3: queue closure or worker lifetime | Unit 5: concurrency | Traces of blocked producers and consumers completing shutdown |
+| Task 4: stalled clients or unbounded output | Unit 6: services | A bounded service whose independent clients continue making progress |
+| Task 5: an unexplained timing difference | Units 3 and 7: machine behavior and measurement | A controlled experiment that distinguishes proposed causes |
+| Task 6: a changed callback or ownership API | Unit 2 and the relevant capstone reasoning | A caller that correctly resumes paused work or transfers ownership |
+| Tasks 7–9: retries, scheduling, or evaluation | Appendix F, then Unit 8 | A deterministic trace with complete resource and outcome accounting |
+
 Once the baseline is recorded, spend the largest share of study time on the weakest relevant fundamentals. Keep a smaller recurring block for independent coding and spoken explanation. If you already demonstrate a skill repeatedly, move forward rather than rereading familiar explanations for reassurance.
 
 Do not equate the eight-week introductory schedule in Appendix B with a deadline for this advanced stage. Decide the pace after learning your starting point, available weekly hours, target role, and application timeline. A short preparation window requires prioritization; it does not make all eight units fit by assertion.
 
-For every advanced unit, use the same derivation notebook as in the foundation: separate requirements and verified contracts from assumptions; compare plausible designs; state the necessary information, invariant, and progress conditions; and build a counterexample. Write your chapter from that record, retaining the mistake that led to the improved explanation. An external reviewer should be able to change one requirement and see you work out the consequences. That makes writing the book part of developing the engineering skill you want to demonstrate.
+Use the foundation's notebook for each advanced unit. Write the explanation from your actual predictions, failures, and corrections. Ask a reviewer to change one requirement and work through the consequences with you; that variation tests whether the argument transfers beyond the project you prepared.

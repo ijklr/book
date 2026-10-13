@@ -16,7 +16,7 @@ Before running it, predict three things: how many bytes enter the consumer, what
 
 A temporary file is a viable intermediate representation. Run the producer, check its result, then give the completed file to the consumer. The file can be inspected or replayed, and the commands need not run together. This costs storage proportional to the intermediate output and delays consumption until the selected completion boundary. Creation, permissions, removal, and storage exhaustion become part of the design.
 
-A pipe instead permits both programs to run concurrently with a bounded kernel buffer. A slow consumer constrains its producer through backpressure. The intermediate bytes are not retained for replay. A hang can arise from relationships among processes and open references, even when every individual call behaves correctly.
+A pipe permits both programs to run concurrently with a bounded kernel buffer. With the blocking descriptors used here, a full buffer makes the producer wait until the consumer frees space. This is **backpressure**: the slower consumer limits how quickly the producer can send. The intermediate bytes are not retained for replay.
 
 | Requirement | Temporary file | Direct pipe |
 | --- | --- | --- |
@@ -29,9 +29,17 @@ We choose the pipe because early consumption and bounded buffering matter for th
 
 ## Derive the state that matters
 
-For reasoning, model the channel with three quantities: buffered bytes `B`, open write references `W`, and open read references `R`. The kernel maintains the actual channel state; our program need not duplicate these counters. The parent needs only its owned endpoints, the child PIDs it must collect, and their results.
+For reasoning, model the channel with three quantities: buffered bytes `B`, open write references `W`, and open read references `R`. A reference is an open descriptor that keeps an endpoint alive; one process can hold several. Duplicating a descriptor or inheriting it across a fork adds a reference. Closing one removes only that reference. The kernel maintains the actual channel state; our program need not duplicate these counters.
 
-For a positive-length blocking read, the important cases are: available bytes can be consumed; an empty pipe with possible writers requires waiting; an empty pipe with no writers produces EOF. Thus “the producer finished” is insufficient. A different process may still hold a write reference. [POSIX read rules for pipes](https://man7.org/linux/man-pages/man3/read.3p.html)
+For a positive-length blocking read, the normal outcomes follow from this state:
+
+| Buffered bytes | Open write references | Reader's outcome |
+| --- | --- | --- |
+| `B > 0` | Any | Consume available bytes; a short read is possible. |
+| `B == 0` | `W > 0` | Wait for data or for all writers to close. |
+| `B == 0` | `W == 0` | Return zero: EOF. |
+
+EOF is a return condition, not a special byte sent by the writer. “The producer finished” is insufficient: another process may still hold a write reference, or buffered bytes may remain unread. Errors and signal interruption still require their usual handling. [POSIX read rules for pipes](https://pubs.opengroup.org/onlinepubs/9799919799/functions/read.html)
 
 The intended final topology is:
 
@@ -43,11 +51,9 @@ producer:        owns its output reference; no unused channel references
 consumer:        owns its input reference; no unused channel references
 ```
 
-This gives two invariants. Bytes enter through the intended producer output and leave through the intended consumer input. Every additional reference has a defined removal point before the parent waits for completion. The first concerns correct data flow; the second is also essential for progress.
+This gives two obligations. Bytes must flow through the intended producer output and consumer input. Each process must also close the channel references it does not need: children do so during setup, and the parent closes its own references before waiting. The parent may begin waiting before a child finishes its setup; correctness does not depend on which runs first. The first obligation concerns data flow; the second is essential for progress.
 
-Consider a proposed version with two pipes: the parent reads the producer's bytes into a buffer and writes them to the consumer. Before asking how large that buffer should be, ask what required result the relay creates. If the parent neither transforms nor inspects the bytes, the direct connection already satisfies our contract. Deleting the relay removes its buffer, its partially forwarded range, and its transfer-failure paths. We can eliminate work before trying to make that work faster.
-
-Now add a genuine requirement: the parent must retain a copy of every intermediate byte for later inspection. The direct connection no longer suffices by itself. Forwarding with storage, or another duplication design, may earn its added state. Ask what “later inspection” means before implementing it: inspecting child statuses requires supervision, but inspecting their bytes requires a data-path change. Similar wording can hide very different obligations.
+The parent needs only its owned endpoints, child PIDs, and collected results. Relaying the bytes through a second pipe would add a buffer, partial-transfer state, and failure paths without satisfying any additional requirement. If the parent later needs to inspect or retain the bytes, that requirement would justify a different data path. Inspecting child statuses alone does not.
 
 The external interface supplies ordering and EOF rules. Our model assumes ordinary blocking descriptors, commands that use their streams as intended, and no requirement to retain the intermediate output. Choosing two commands, a `--` separator, and a particular result policy are application decisions. Actual scheduling and pipe capacity are observations, not assumptions the algorithm should depend on.
 
@@ -73,6 +79,8 @@ parent waits for consumer: plans to close its reference afterward
 
 No byte is corrupted, and no invalid pointer is involved. This is a liveness failure caused by an ownership decision. Closing the parent's reference before waiting removes the cycle. Sleeping, changing priority, or closing only the producer's descriptor cannot repair the missing ownership transition.
 
+The same reasoning reaches beyond these three processes. If the producer starts a descendant that inherits its standard output, that descendant holds a write reference too. The consumer may wait for EOF after the original producer has exited. When diagnosing the hang, look for every holder of the endpoint, including descendants. [Descriptor inheritance across execution](https://pubs.opengroup.org/onlinepubs/9799919799/functions/exec.html)
+
 ## Map the topology onto descriptors
 
 `pipe(ends)` creates the channel and returns its read descriptor in `ends[0]` and write descriptor in `ends[1]`. Forking copies references into each child. A possible scheduling point after both forks, before child cleanup, has both original endpoints in all three processes. Other schedules perform some cleanup earlier; correctness must survive either order. [POSIX pipe creation](https://man7.org/linux/man-pages/man3/pipe.3p.html)
@@ -82,6 +90,29 @@ The producer needs its standard output to refer to the write end. `dup2(ends[1],
 `dup2()` replaces the target descriptor as one operation. Separately closing a target and calling `dup()` opens a gap in which another allocation could take the desired number. When its source and target differ, successful `dup2()` clears the target's close-on-exec flag, so the redirected standard stream survives execution. [POSIX `dup2` specification](https://man7.org/linux/man-pages/man3/dup2.3p.html)
 
 The example checks that descriptors 0, 1, and 2 are initially open. Its new pipe endpoints are consequently above 2, so closing the originals cannot close the newly redirected standard stream. This is a checked precondition, not a universal fact about pipe descriptor numbers. A more general launcher can move temporary descriptors above the standard range and handle closed standard streams deliberately.
+
+### Account for every reference through redirection
+
+For one concrete run, suppose the pipe receives descriptors 3 and 4. At the instant just after both forks, let all three processes still hold both originals. Descriptor 3 names the read end and 4 the write end. The inherited standard streams name other resources. Track only references to this new pipe:
+
+| Setup completed so far | Parent's pipe descriptors | Producer's pipe descriptors | Consumer's pipe descriptors |
+| --- | --- | --- | --- |
+| Both forks | `3:R, 4:W` | `3:R, 4:W` | `3:R, 4:W` |
+| Producer redirects and closes originals | `3:R, 4:W` | `1:W` | `3:R, 4:W` |
+| Consumer redirects and closes originals | `3:R, 4:W` | `1:W` | `0:R` |
+| Parent closes originals | None | `1:W` | `0:R` |
+
+In the producer, `dup2(4, 1)` first replaces that process's old standard-output reference. It leaves descriptor 4 open and adds descriptor 1 as another reference to the write end. Closing 3 and 4 then leaves 1 usable. The consumer performs the corresponding transition with `dup2(3, 0)`. Neither operation changes the parent's descriptors: the descriptor tables belong to different processes even though some entries refer to shared resources.
+
+The final row has `R == 1` and `W == 1`. After the producer closes standard output or exits, `W` reaches zero. The consumer can still read buffered bytes; its next positive-length read after draining them returns EOF. No process sends an EOF byte.
+
+**Predict:** the parent accidentally closes descriptor 1 instead of descriptor 4, then waits. Both children complete their correct setup. Can the consumer finish after the producer exits? What if the producer closes 4 before attempting its `dup2(4, 1)`?
+
+:::reveal Review the descriptor trace
+
+The parent retains its pipe write reference at 4. Closing its own standard output does not remove that reference, so the consumer can drain the pipe and then wait forever for EOF. In the second variation, `dup2()` fails because its source descriptor has already been closed, assuming nothing has reused that number. Redirection must acquire the surviving reference before cleanup releases the original. [POSIX descriptor duplication](https://pubs.opengroup.org/onlinepubs/9799919799/functions/dup.html)
+
+:::
 
 Before revealing the source, draw a row for the parent and each child. Mark the reference created by each duplication, then cross out every original endpoint. Finally, put each wait after the parent's last required close. Your drawing should explain the implementation's order without depending on the numbers 3 and 4.
 
@@ -105,9 +136,9 @@ The cancellation policy uses `SIGKILL` for an incomplete setup. That is an expli
 
 A byte stream does not carry the producer's process status. A consumer can successfully count an empty stream produced by a failing program. Returning only the right command's status is one useful policy for shell composition; checking both statuses is another. Our tool returns a nonzero right status if present, otherwise the left status, making producer failure visible.
 
-There is a further consequence: a consumer may intentionally stop early. Once all read references are closed, a later write raises `SIGPIPE`; when that signal is ignored, the write reports `EPIPE`. Our tool can therefore report a nonzero producer result for an intentional early-consumer exit. A specialized pipeline might classify that outcome differently. [POSIX write errors](https://man7.org/linux/man-pages/man3/write.3p.html)
+There is a further consequence: a consumer may intentionally stop early. This is where `R` matters. Once `R == 0`, a later write generates `SIGPIPE`; its default action terminates the writer. If the signal is ignored, the write instead reports failure with `EPIPE`. Our tool can therefore report a nonzero producer result for an intentional early-consumer exit. A specialized pipeline might classify that outcome differently. [POSIX write errors](https://man7.org/linux/man-pages/man3/write.3p.html)
 
-Also distinguish a byte stream from messages. Two writes do not require two corresponding reads. Atomic insertion relative to competing writers does not establish read boundaries. A record-oriented protocol would need lengths, delimiters, or another framing rule. Counting bytes needs no such rule, which is one reason it makes a useful first consumer.
+Also distinguish a byte stream from messages. If a producer writes `ab` and then `cd`, the consumer must accept `abcd` in one read or the same bytes split across smaller reads. The write boundaries are not part of the stream. Atomic insertion relative to competing writers does not establish read boundaries either. A record-oriented protocol needs lengths, delimiters, or another framing rule. Counting bytes needs no such rule, which is one reason it makes a useful first consumer.
 
 ## Challenge the implementation with inputs
 

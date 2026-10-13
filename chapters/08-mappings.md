@@ -1,6 +1,6 @@
 # Chapter 8 — Reading a file through virtual memory
 
-Suppose you must count occurrences of one byte in a binary file. The file may contain zero bytes and may be empty. You need an exact count, bounded index arithmetic, and a clear failure result. Begin with an ordinary, stable regular file whose size fits the process's address-space model. Those conditions are input assumptions to examine, not properties established merely by opening a path.
+Suppose you must count occurrences of one byte in a binary file. The file may contain null bytes or be empty. You need an exact count, bounded index arithmetic, and a clear failure result. Begin with an ordinary regular file whose length and contents remain stable throughout the scan, and whose size fits the limits checked below. Those are input assumptions to examine, not properties established merely by opening a path.
 
 The counting problem does not require a memory mapping. A buffered read loop could solve it. We will compare that design with viewing the file through virtual memory, then choose a mapping so that its different ownership and failure boundaries become visible.
 
@@ -19,9 +19,9 @@ Initially `i` and `count` are zero. If the next byte matches, increase `count`; 
 
 This reasoning exposes two requirements that the storage interface must satisfy. Every accessed position must belong to the permitted range, and the bytes being inspected must have the stability required by “exact count.” A loop can stay within its numeric bounds while reading a mixture of versions. Bounds safety and snapshot consistency are different properties.
 
-Can we remove most of the scan before making it faster? For arbitrary bytes, an exact answer, and no trusted summary, consider any algorithm that leaves one position unexamined. Construct two same-length inputs identical at every examined position: the unexamined byte matches `wanted` in one and does not in the other. The algorithm has the same evidence for both, but their correct counts differ. It therefore cannot guarantee the answer. In the worst case, the input contains information we must inspect throughout its length, even if one machine instruction examines several bytes.
+Can we skip most of the scan? Suppose the input is arbitrary and no trusted summary is available. If an algorithm leaves one position unexamined, construct two files identical everywhere else: that byte matches `wanted` in one file and differs in the other. The algorithm has the same evidence for both, but their correct counts differ. An exact answer therefore requires examining every byte. One instruction may examine several bytes; the argument limits the information needed, not the instruction count.
 
-This lower bound belongs to the problem's assumptions. A trusted count associated with the exact immutable version could eliminate a later scan; accepting an estimate could permit sampling. Both change the available evidence or the required answer. Merely choosing `mmap()` changes neither. Establish what work is necessary before arguing about how cheaply an interface performs it.
+A trusted count for the exact immutable version could eliminate a later scan; an estimate could permit sampling. Choosing `mmap()` alone changes neither the available evidence nor the required answer.
 
 C strings would be the wrong representation for arbitrary binary input: an embedded zero is data, not an ending marker. An explicit length and `unsigned char` access preserve all byte values. The command accepts the desired value as decimal `0` through `255`; an argument itself cannot carry an embedded null byte.
 
@@ -43,7 +43,9 @@ Our one-pass byte counter has no requirement that makes mapping inevitable. The 
 
 ## Specify the assumptions around a mapping
 
-Virtual addresses identify locations in a process's address space. The operating system manages mappings at page granularity, but page size is not a universal constant such as 4096. If an algorithm needs it, query `sysconf(_SC_PAGESIZE)` and check the result. Our whole-file mapping starts at offset zero and lets the system select the virtual address, avoiding alignment arithmetic in this first version.
+The pointers used by this program refer to **virtual addresses** in its process. A mapping associates a range of those addresses with a range of the file. For a mapping starting at file offset zero, `bytes[i]` accesses file position `i`; the pointer value itself is not a file offset.
+
+The operating system manages mappings in units called **pages**. Page size is not a universal constant such as 4096. If an algorithm needs it, query `sysconf(_SC_PAGESIZE)` and check the result. Our whole-file mapping starts at offset zero and lets the system select the virtual address, avoiding alignment arithmetic in this first version. The requested length still defines our scan boundary, even if the system manages a larger page-aligned region.
 
 The roles of the statements in our design are different:
 
@@ -69,13 +71,15 @@ numeric count:                    accumulated -------- usable afterward
 
 After successful mapping, closing the descriptor does not end the mapping. Conversely, closing the descriptor alone is not how we release the address range. `munmap()` ends that lifetime, after which pointers into it are unusable. [Mapping and descriptor lifetime](https://man7.org/linux/man-pages/man2/mmap.2.html)
 
-The implementation therefore needs to retain the mapping's base address and length until release. Its scan pointer borrows access; it owns no independent lifetime. The final numeric count does not borrow the mapped bytes, so it can be printed after unmapping.
+The implementation must retain the mapping's base address and length so it can release the correct range. A pointer into that range borrows access: keeping a copy of the pointer does not keep the mapping alive. The final numeric count contains no pointer into the mapping, so it remains usable after unmapping.
 
-Derive the failure cleanup from acquired resources rather than from a generic label called “error.” Before mapping, only the descriptor is owned. After mapping and before closing, both are owned. During scanning, the mapping remains. A failed descriptor close after successful mapping still leaves a mapping to release. Drawing those states makes missed cleanup visible before the code grows more branches.
+Derive failure cleanup by asking which resources have been acquired. Before mapping, the program owns only the descriptor. After mapping and before closing, it owns both resources. During scanning, only the mapping remains. Even a failed descriptor close after successful mapping leaves that mapping to release. Drawing these states makes missed cleanup visible before the code grows more branches.
 
 ## Validate the boundary between integer domains
 
-`fstat()` reports size in signed `off_t`; the mapping interface accepts a `size_t` length. Casting does not prove representability. Reject a negative size and check the positive value against the destination range before converting. Otherwise, the numeric value used for bounds could cease to mean the measured file length.
+`fstat()` examines the opened object, so the size check and mapping concern the same file even if another process replaces its pathname. That does not stop anyone from modifying the opened object itself.
+
+The reported size has type `off_t`, a signed integer type; the mapping interface accepts a `size_t` length. Casting does not prove representability. Reject a negative size and check the positive value against the destination range before converting. Otherwise, the numeric value used for bounds could cease to mean the measured file length.
 
 Our example also restricts length to `PTRDIFF_MAX`. This is an explicit whole-file design limit that keeps the region within the range representable by pointer differences. It is not a promise that every smaller mapping will succeed. Available virtual address space and other resource limits still matter.
 
@@ -89,13 +93,39 @@ Before revealing the source, write the scan invariant and the three resource sta
 
 :::
 
-The map is `PROT_READ` and `MAP_PRIVATE`. The failure test uses `MAP_FAILED`, not `NULL`. After a successful map, the descriptor is closed before the scan, making the independent lifetimes observable in the code. The scan advances only while `i < length`, and its count cannot exceed the validated length.
+The map uses `PROT_READ`, allowing loads but not stores through the mapping, and `MAP_PRIVATE`, whose limits we examine below. The failure test uses `MAP_FAILED`, not `NULL`. After a successful map, the descriptor is closed before the scan, making the independent lifetimes observable in the code. The scan advances only while `i < length`, and its count cannot exceed the validated length.
 
 The program checks release and final flushing before reporting success. A computed answer that never reaches its destination is not a successful command result. Failed closes are not blindly retried; descriptor reuse and the interrupted-close issues in Chapter 3 require an explicit policy.
 
+## Work through a smaller mapping window
+
+Suppose a later application needs 3,000 bytes beginning at file offset 5,000 rather than the whole file. For this worked example only, assume the queried page size is 4,096 and the stable file contains at least 8,000 bytes. The requested interval is `[5000, 8000)`. A portable mapping design aligns its starting file offset to a page boundary. [POSIX mapping alignment](https://pubs.opengroup.org/onlinepubs/9799919799/functions/mmap.html)
+
+Round the starting offset down, then preserve the displacement:
+
+```text
+base_offset = 5000 - (5000 % 4096) = 4096
+delta       = 5000 - 4096         = 904
+map_length  = 904 + 3000          = 3904
+```
+
+The requested mapping covers file bytes `[4096, 8000)`. If `mapping` is the returned base, the scan starts at `(const unsigned char *)mapping + 904` and examines exactly 3,000 bytes. Its first byte corresponds to file offset 5,000; its last corresponds to 7,999. The first 904 mapped bytes are alignment overhead for this operation, not part of the count.
+
+Keep both pointers conceptually distinct. The displaced pointer identifies the data to inspect; `mapping` identifies the resource to release. Cleanup uses `munmap(mapping, 3904)`, preserving the original base and requested mapped length. It does not use the displaced pointer. The implementation may round its internal coverage to pages, but that does not enlarge the application's permitted scan range.
+
+Before calculating in C, validate a nonnegative offset and a representable positive page size. Check the file range without overflowing: after confirming `offset <= file_size`, compare the requested length with `file_size - offset`. Check conversions and `delta + requested_length` separately against the mapping's size limits. Handle a zero requested length without mapping.
+
+**Predict:** keep offset 5,000 but increase the requested length to 4,000. What length must the mapping cover? Why is mapping only 4,000 bytes from offset 4,096 insufficient?
+
+:::reveal Review the window arithmetic
+
+The mapping must cover `904 + 4000 == 4904` bytes, through file offset 8,999 inclusive. The file must therefore contain at least 9,000 bytes. A 4,000-byte mapping from offset 4,096 covers only `[4096, 8096)`, leaving just 3,096 requested bytes after the displacement. Page rounding must not be used to excuse the incorrect length: request the entire range the algorithm intends to access.
+
+:::
+
 ## Challenge the assumption that private means frozen
 
-“Private mapping” sounds like a private snapshot, but that intuition supplies a guarantee the interface does not make. The flag describes how writes through a private mapping relate to the underlying object; it does not promise a frozen version immune to external mutation. A shared mapping has different sharing behavior, but it likewise does not add an application transaction or locking protocol. [Mapping flags](https://man7.org/linux/man-pages/man2/mmap.2.html)
+"Private mapping" sounds like a private snapshot, but the flag provides no such guarantee. For a writable private mapping, changes made through that mapping do not update the underlying file. Whether later changes to the file become visible through the private mapping is unspecified. Our read-only mapping therefore still depends on the stable-file assumption. [POSIX mapping flags](https://pubs.opengroup.org/onlinepubs/9799919799/functions/mmap.html)
 
 A counterexample to “we checked the size, so reads are safe” is:
 

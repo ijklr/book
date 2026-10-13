@@ -2,11 +2,11 @@
 
 Suppose someone asks you to build a fast message queue. It is tempting to reach for a familiar implementation, or to search for a clever one. Begin earlier: what does fast mean, which messages must survive, who produces and consumes them, and what happens when the consumer cannot keep up?
 
-First-principles reasoning in this book means making your starting points explicit and building an argument from them. Some starting points are requirements. Others are mathematical facts, language rules, operating-system contracts, or assumptions you have chosen for a model. You then derive consequences, compare designs, and test the uncertain parts.
+First-principles reasoning means stating what you know and deriving what follows. In this book, the starting points include requirements, mathematical facts, language rules, operating-system contracts, and explicit model assumptions. Use them to compare designs and identify what still needs testing.
 
 In a 2013 interview, Elon Musk describes first-principles reasoning as starting with fundamental truths and building conclusions from them. He also explains that the effort makes it worth applying selectively to important problems. That is the habit we will practice at consequential design decisions throughout this book. [Elon Musk interviewed by Alaina G. Levine, APS News](https://www.aps.org/apsnews/2013/10/profiles-in-versatility)
 
-For systems programming, the exercise is concrete: question an inherited requirement, identify the facts that constrain a solution, estimate necessary work, and build a small experiment around the uncertain step. The derivations below are our applications of that habit. Their justification comes from the argument, contracts, and evidence you can inspect.
+The derivations below apply that habit to systems programming. Their justification comes from the contracts, arguments, and evidence you can inspect.
 
 ## Start at a useful boundary
 
@@ -49,11 +49,11 @@ A cost model separates work forced by the result from work introduced by a desig
 
 Write units beside every estimate: bytes retained, calls made, records per second, or seconds waiting. Label idealized bounds and measured values separately. A lower bound identifies work a design cannot avoid under its model; it does not promise an implementation can reach that bound. System-call costs, scheduling, failure handling, and interactions between stages can account for a gap.
 
-This gives optimization a direction: remove work whose purpose has disappeared, simplify what remains, then measure the suspected limit. In the following chapters, apply the question to intermediate buffers, parent processes, shared counters, and network framing. Reuse familiar designs when they meet the contract; reopen their assumptions when a changed workload or requirement makes the cost matter.
+This gives optimization a direction: remove work whose purpose has disappeared, simplify what remains, then measure the suspected limit. Reuse familiar designs when they meet the contract; revisit their assumptions when the workload or requirements change.
 
 ## A repeatable reasoning cycle
 
-Use the following sequence while studying and designing. It is a tool for exposing missing reasoning, not a form you must mechanically fill out for every line of code.
+Use the following sequence for a design decision or an investigation. An **invariant** is a property that must hold at specified boundaries, such as before and after each queue operation. A **progress argument** explains what lets the next step happen: a consumer must run and remove an item before a producer waiting on a full queue can proceed. State both; correct stored values alone do not explain whether the program will finish.
 
 1. **Define the result.** State observable inputs, outputs, success, failure, and resource limits. Replace adjectives such as fast, safe, and robust with questions you can evaluate. If a request prescribes a mechanism, ask which outcome requires it.
 2. **State the starting facts.** Separate requirements, external contracts, assumptions, and observations. Investigate a contract when uncertainty about it could invalidate your design.
@@ -64,7 +64,7 @@ Use the following sequence while studying and designing. It is a tool for exposi
 7. **Test and revise.** Use proof for consequences of a model and experiments for claims about an implementation or environment. Preserve failures as tests.
 8. **Transfer the idea.** Change one requirement and work out which conclusions still hold. This distinguishes an understood argument from a memorized implementation.
 
-The state step is often decisive. A partial write forces you to remember progress somewhere, but it does not force a particular variable name or data structure. A delayed callback forces a decision about who retains the unaccepted event. The purpose of the derivation is to expose necessary information and tradeoffs, not to pretend there is only one possible program.
+A partial write forces you to remember progress, but it does not prescribe a variable name or data structure. A delayed callback forces you to decide who retains the unaccepted event. Derive the necessary information first, then choose its representation.
 
 ## Worked derivation: a recorder with a slow consumer
 
@@ -113,9 +113,45 @@ Let `head` identify the next record to remove, and let `count` be the number pen
 the logical queue occupies count slots starting at head, wrapping at B
 ```
 
-The next insertion position is mathematically `(head + count) mod B`. In C, the implementation must also justify the integer arithmetic; mathematical addition and machine addition are different contracts. A bounded capacity and checked arithmetic, or an equivalent branch that avoids overflow, can make the representation valid.
+The next insertion position is mathematically `(head + count) mod B`. For example, with `B = 4`, `head = 3`, and `count = 2`, the pending records occupy slots 3 and 0, and the next insertion uses slot 1. In C, the implementation must also justify the integer arithmetic; mathematical addition and machine addition are different contracts. A bounded capacity and checked arithmetic, or an equivalent branch that avoids overflow, can make the representation valid.
 
 At empty, `count == 0`; at full, `count == B`. A design storing only equal head and tail positions cannot distinguish those two states without another rule. It could reserve a slot, store a count, or add a phase bit. The apparent implementation detail is a consequence of needing to distinguish two observable states.
+
+Trace a capacity-two queue before adding threads. Start with `head = 0` and advance it only when removing an item:
+
+| Event | `head` afterward | `count` afterward | Pending records, oldest first |
+| --- | --- | --- | --- |
+| Insert A into slot 0 | 0 | 1 | A |
+| Insert B into slot 1 | 0 | 2 | A, B |
+| Attempt to insert C; wait for space | 0 | 2 | A, B |
+| Remove A; slot 0 becomes reusable | 1 | 1 | B |
+| Complete C's insertion into slot 0 | 1 | 2 | B, C |
+
+The blocked attempt changes no queue state. It becomes an accepted record only when its insertion completes. That distinction connects the public promise to the representation.
+
+## Turn a trace into an invariant argument
+
+The five-row trace explains one execution. To justify every permitted sequence of queue operations, we need an argument that survives the next operation, whatever that operation is. This is the practical use of an invariant.
+
+Start by making the content claim explicit: the sequence delivered so far is a prefix of the sequence accepted so far. Reading the `count` occupied slots from `head`, wrapping at `B`, gives exactly the remaining suffix, in order. These sequences are part of our reasoning; the implementation does not have to retain the entire history. The numeric bounds alone would not establish this claim. A queue could keep `count` in range while overwriting a record or returning the wrong one.
+
+Now check three obligations, still treating operations as indivisible events:
+
+1. **Establish the invariant.** With `head = 0`, `count = 0`, and positive capacity, both bounds hold. The logical sequence is empty, matching the absence of accepted records.
+2. **Preserve it on insertion.** Insert only when `count < B`. The slot immediately after the logical sequence is free; write the new record there, then increase `count`. All old records keep their order and the new record becomes the newest. The count remains at most `B`. A full-queue wait changes none of this state.
+3. **Preserve it on removal.** Remove only when `count > 0`. Return the record at `head`, advance `head` by one with wraparound, and decrease `count`. The returned record was the oldest; the remaining sequence has its previous order. The count remains nonnegative.
+
+Initialization establishes the claim, and every allowed transition preserves it. Repeating those transitions therefore preserves the claim for any finite operation sequence. That is an induction argument, expressed in the terms an implementation must satisfy. It assumes the arithmetic is valid and the slot operations do what we specified; concurrency adds further obligations.
+
+**Predict before continuing:** a capacity-two queue contains A then B. A faulty removal returns B, leaves A pending, and decreases `count` from 2 to 1. Which part of the invariant detects the bug? Would checking only the bounds detect it?
+
+:::reveal Review the strength of the invariant
+
+The bounds still hold, but removal delivered the newest record before the oldest. The content-and-order claim fails. A useful invariant must connect the stored representation to the caller's promise; a valid array index alone says nothing about FIFO delivery.
+
+The argument also does not show that a waiting producer ever runs again. That is a progress obligation, considered next.
+
+:::
 
 Now add multiple threads. A producer cannot expose the incremented count before the inserted record is ready for a consumer, and two producers cannot independently claim the same slot. The representation requires a coordinated state transition. A mutex is one way to enforce it; a more specialized atomic algorithm needs its own proof. Calling the queue lock-free does not supply that proof.
 
@@ -156,13 +192,11 @@ For a 60-minute study session, use this adaptable allocation:
 | 45–55 minutes | Comparison with the reference reasoning and a corrected explanation |
 | 55–60 minutes | One changed-assumption question to attempt in a later session |
 
-This is a suggested routine, not a validated learning-rate claim. Some labs need several sessions. Preserve an incomplete attempt so you can see where the reasoning stopped. Looking up a contract is part of the work; copying a finished design answers a different question about your current skill.
-
-In the browser edition, reference implementations and selected review material are initially folded away. Write a prediction before opening them. The Markdown edition also contains these sections inside disclosure blocks; readers that do not support folding still show their contents. Print mode expands the browser edition so the exported book remains complete.
+Adjust these times to the problem; some labs need several sessions. Preserve an incomplete attempt so you can see where the reasoning stopped. Looking up a contract is part of the work. Before opening the folded reference material, save your prediction and design so you can distinguish what you derived from what the reference taught you.
 
 ## Know when to revise and when to stop
 
-Review the central design in a chapter using the six questions below. This is the book's review standard, informed by the published first-principles approach discussed above; it is not a test supplied by Elon Musk or evidence of his approval.
+Review a chapter's central design using these six questions. They are this book's application of the reasoning method, not an externally certified assessment.
 
 | Review question | Evidence the explanation must supply |
 | --- | --- |
@@ -179,7 +213,7 @@ For example, a proposed explanation that says “mapping removes explicit reads,
 
 Apply the same standard to a design suggested by an expert: identify which premises and evidence support it. Fix a discovered defect, then revisit the affected reasoning. A review passes when all six questions have adequate answers within the stated scope, including clearly bounded conditional claims.
 
-This stopping rule does not establish that no future refinement exists. A new workload, platform, or requirement can expose a missing case. Record unresolved uncertainty separately from finished work so that it remains visible without making every task endless.
+Record unresolved uncertainty and move on when the stated scope is supported. A new workload, platform, or requirement may give you a concrete reason to reopen the design.
 
 ## Derive it yourself
 

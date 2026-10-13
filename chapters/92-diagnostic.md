@@ -1,10 +1,10 @@
 # Appendix E — An independent systems assessment
 
-These are original study exercises for developing skills relevant to demanding engineering roles at HRT, OpenAI, Anthropic, and other firms. They are not official company questions or predictions about an interview. They test skills the earlier chapters introduce without consistently requiring you to demonstrate independently. Completing them provides evidence for choosing your next work; it does not establish an offer probability.
+These original study exercises ask you to apply the earlier chapters without a supplied solution. Use them to find gaps and choose your next project when preparing for demanding engineering roles at HRT, OpenAI, Anthropic, or elsewhere. They are learning assessments, not official company questions or hiring predictions.
 
-Attempt each task from a blank implementation before opening related chapter solutions. Begin with a requirement statement, a ledger of contracts and assumptions, and two candidate designs. Derive the information and invariant your choice needs, then construct a counterexample before coding. Compiler diagnostics, debuggers, and primary documentation are allowed. Keep an assistance log: distinguish documentation lookup, a conceptual hint, code review, and a supplied solution. If you use an assistant, save your independent attempt first and label subsequent work as assisted.
+Attempt each task before opening related chapter solutions. Start from a blank implementation except in Task 2, where you repair the supplied code. State the requirements and assumptions, compare two designs, and write an invariant and counterexample before coding. Compiler diagnostics, debuggers, and primary documentation are allowed. Log any hints, review, or supplied code; save your independent attempt before accepting assistance.
 
-The timeboxes measure your present approach, not a hiring cutoff. Save the code and notes when time expires, then finish and repair them without the clock. Tasks 1–3 fit separate focused sessions. Tasks 4–5 are longer labs. Do not compress the assessment into one exhausting day.
+The timeboxes help you compare attempts. Save the code and notes when time expires, then finish and repair them without the clock. Tasks 1–3 and 6 begin with focused implementation attempts; Tasks 4–5 are longer labs. Tasks 7–9 extend the assessment to retries, scheduling, and evaluation; choose them when they match your target work. Spread the tasks across sessions.
 
 For each task, record four separate rubric results as **demonstrated**, **partial**, or **not yet demonstrated**. Explain each result with an artifact: code, failing input, test, trace, or measurement. A total score would hide important differences between correct implementation, explanation, and evidence. After the attempt, change one assumption and explain which part of the argument must change. The ability to do that matters even when the first implementation was successful.
 
@@ -33,9 +33,9 @@ Rubric:
 
 **First attempt: 60–75 minutes.** This intentionally flawed excerpt collects length-prefixed frames. Its bugs are not marked. Build your own harness and repair it without replacing the task with an unrelated implementation.
 
-The header is four bytes, most significant byte first. Bodies may contain any bytes and have lengths 0–4096. The callback borrows a complete body only during the call and cannot fail. Input chunks do not alias the buffer. A zero-length input may use a null pointer. Initialize `struct frames` to zero and eventually free its `data` field.
+The header is four bytes, most significant byte first. Bodies may contain any bytes and have lengths 0–4096. The callback borrows a complete body only during the call and cannot fail. It must not modify or free the parser or its buffers, feed the same parser recursively, or retain the body pointer after returning. Input chunks do not alias the buffer and remain unchanged during the call. A zero-length input may use a null pointer. Initialize `struct frames` to zero and eventually free its `data` field.
 
-Required behavior: emit complete frames exactly once, preserve incomplete input across calls, reject an oversized length as soon as its header is available, and preserve the previous buffer on allocation failure. Return zero for accepted input and minus one for an error. After malformed input, the caller may destroy the object. At EOF, remaining buffered bytes mean truncation.
+Required behavior: emit complete frames exactly once, preserve incomplete input across calls, reject an oversized length as soon as its header is available, and preserve the previous buffer on allocation failure. A failed allocation must consume none of the new chunk and emit no frames, so the caller may retry that chunk. Return zero for accepted input and minus one for an error. In the repaired version, set `errno` to `ENOMEM` for allocation failure, `EOVERFLOW` for an unrepresentable buffer size, and `EPROTO` for an oversized frame. This lets the caller distinguish retryable allocation failure from rejected input. Size overflow must also leave the previous state unchanged. After malformed input, require destruction or reinitialization before another feed. At EOF, remaining buffered bytes mean truncation.
 
 ```c
 #include <stddef.h>
@@ -154,10 +154,12 @@ A timeout may launch another attempt while the original still runs. Accept the f
 
 Use a deterministic event trace: launch attempt A, time out A, launch B, receive B's success, receive A's delayed success, receive B's duplicate success. The expected accepted-result count is one; both attempts may have done work. Change the arrival order, inject an identity conflict, and show the expected decisions before running the code.
 
+Declare finite limits for job records, attempts, payload bytes, and retained results. Retain identity and outcome records for the full run; reject a new job or refuse another attempt when its reservation cannot fit. A timed-out attempt that still runs retains its execution resources. These limits make the exercise implementable without assuming infinite deduplication storage.
+
 Rubric:
 
 - Identity checks distinguish resubmission from payload or version conflicts.
-- Attempt and logical-job states explain exactly which replies may be accepted.
+- Attempt and logical-job states explain exactly which replies may be accepted and which resources remain reserved.
 - Deterministic traces cover duplicates, reordered replies, unknown attempts, and repeated work.
 - The result guarantee states its lifetime and does not claim exactly-once execution or restart recovery.
 

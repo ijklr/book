@@ -2,29 +2,66 @@
 
 You have two decisions to make. A streaming search sometimes misses a match near an input boundary, and you must decide whether a proposed fix addresses the cause. Someone also proposes a larger input buffer as a performance improvement, and you must decide whether the added resource cost is justified.
 
-The goal is evidence strong enough for those decisions. The constraints are limited investigation time, tools that observe only part of execution, and a machine whose timing varies. Running more commands is useful only when their results can distinguish plausible explanations.
+The goal is evidence strong enough for those decisions. Investigation time is limited, each tool sees only part of execution, and timings vary from run to run. Begin with a question that an observation can answer. A command earns its place in the investigation when different results would lead you to different next steps.
 
 ## Make the claim smaller than the uncertainty
 
-For the suspected bug, the application contract says read boundaries must not alter search results. A model of a faulty implementation says it discards a partial match after each input chunk. An observation might be a missing match in one supplied file. The hypothesis is that discarding state caused that missing match. These are different statements: the contract tells us what should happen, the model suggests a mechanism, and the observation needs an explanation.
+For the suspected bug, the contract says read boundaries must not alter search results. The observation is a missing match in one input. One hypothesis is that the implementation discards a partial match after each chunk. Keep those statements distinct: the contract defines the required result, the observation records what happened, and the hypothesis proposes a cause that an experiment can challenge.
 
 Write down the command, input bytes, expected output and status, actual output and status, and build identity. “Sometimes wrong” is not yet a reproducer. “Correct after adding a print” is an observation about an intervention, not proof that printing repaired the design.
 
-For a candidate implementation, compare two plausible causes: state is lost at a chunk boundary, or a line-buffering design forgets to process its last unterminated line at EOF. A large file can exhibit both. Feed `nee` then `dle\n`, then separately supply `needle` without a newline and end the input. Different failures point toward different transitions.
+Compare two plausible causes: state is lost at a chunk boundary, or a line-buffering design forgets to process its last unterminated line at EOF. A large file can exhibit both. Use pattern `needle` in two small experiments. In the first, call the matcher directly with `nee` and then `dle\n`. In the second, supply `needle` in one chunk and end the input. Direct calls control chunk boundaries; two writes to a pipe do not guarantee two corresponding reads.
 
 Before checking the implementation, commit your predictions for each hypothesis. If either hypothesis could explain every possible outcome, it is too vague to guide this experiment.
 
 :::reveal Review the discriminating cases
 
-A boundary-state defect can fail the split `nee`/`dle\n` case even though finalization is unnecessary to recognize the completed newline-terminated line. A finalization defect can fail the unterminated-line case even when the pattern arrives in one chunk. Both defects may coexist, so a result narrows the investigation without establishing that only one fault exists.
+Assume each proposed defect is the only fault, and that ordinary matching works:
+
+| Hypothesis | Feed `nee`, then `dle\n` | Feed `needle`, then signal EOF |
+| --- | --- | --- |
+| Partial-match state is discarded between chunks | Match can be lost | Match is found |
+| A buffered final line is discarded at EOF | Match is found when the newline arrives | Match is lost |
+
+Each experiment requires one report for line 1. Together, they distinguish these hypotheses better than one large failing input. Both defects may coexist; if both cases fail, do not force the result into a one-bug explanation.
 
 :::
 
 ## Derive a test from an invariant
 
-The matcher's state summarizes the relevant prefix already consumed. Therefore feeding chunks `a` and `b` must agree with feeding their concatenation, provided no reset intervenes and the stream ends at the same point. The capstone reports when a match is found and needs no finalization function; a line-buffering alternative may need EOF processing. The property applies to either design.
+The matcher's state summarizes the relevant prefix already consumed. Therefore feeding byte sequences `a` and `b` in separate calls must produce the same match events as feeding their concatenation, provided no reset intervenes, callbacks succeed, and the stream ends at the same point. The capstone reports as soon as a match is found and needs no finalization function. A line-buffering alternative may need EOF processing; include that step in both versions of the experiment.
 
-The capstone's C tests feed the same bytes at every two-part split and at many repeated chunk sizes. A separate Python oracle splits bounded test input into newline-delimited byte strings and performs direct membership checks. The oracle can use memory freely for small test cases even though the production tool must stream. Different structures make identical defects less likely than copying the production algorithm into its tests.
+Try a small investigation in which the fault is visible. This intentionally defective Python candidate counts chunks containing a pattern. It stands in for a design that mistakes read boundaries for report boundaries; it is not the capstone implementation. The oracle instead counts matching lines in the complete, small input. Predict which rows disagree before running:
+
+```sh
+python3 - <<'PY'
+pattern = b"needle"
+cases = [
+    ("one chunk", [b"needle\n"]),
+    ("split match", [b"nee", b"dle\n"]),
+    ("split after match", [b"needle", b"\n"]),
+    ("no final newline", [b"needle"]),
+    ("same line twice", [b"needle", b"needle\n"]),
+]
+for name, chunks in cases:
+    observed = sum(pattern in chunk for chunk in chunks)
+    expected = sum(pattern in line
+                   for line in b"".join(chunks).split(b"\n"))
+    print(f"{name}: observed={observed} expected={expected}")
+PY
+```
+
+The lists supply the exact chunks to the candidate, so process scheduling cannot change this experiment's boundaries. The first three rows hold the logical input fixed. The fourth changes only the final newline; the fifth introduces a second occurrence on the same line. Each change challenges a different part of the reporting rule.
+
+:::reveal Review the controlled investigation
+
+Every expected count is 1. The candidate reports 0 for `split match`, 2 for `same line twice`, and 1 for the other rows. The first mismatch supports the lost-prefix hypothesis. The second reveals a separate missing fact: whether the current line has already been reported. Passing the unterminated-line case gives no reason to change EOF handling for this candidate.
+
+A repair that preserves partial matches can fix the first defect while leaving duplicate reports. Keep both cases. After restoring cross-chunk matching, suppressing every report after the first could pass this small collection but fail an input containing matches on two different lines. Add that counterexample before accepting the repair. A test collection grows from the promises a repair could accidentally violate, not simply from the number of cases already passing.
+
+:::
+
+The capstone's C tests feed the same bytes at every two-part split and at many repeated chunk sizes. This tests a relation between executions: changing how bytes are grouped must leave the reports unchanged. A separate Python **oracle**, a simple implementation of the expected result, splits bounded test input into newline-delimited byte strings and performs direct membership checks. The oracle can use memory freely for small test cases even though the production tool must stream. Its different structure reduces the chance of reproducing the production algorithm's defect in the test.
 
 Neither approach proves every input. Exhaustive splits are exhaustive only for the selected byte strings. Fixed-seed random inputs add variety and reproducibility; deliberately chosen cases still need to exercise empty input, embedded zero bytes, long lines, overlapping prefixes, and finalization. A thousand random strings may never put a match across the boundary you care about.
 
@@ -47,6 +84,7 @@ Its separate `build-sanitize/` directory prevents ordinary objects from being mi
 For unsynchronized thread access, use a separate ThreadSanitizer build when your platform and runtime support it:
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -g -O1 \
   -fsanitize=thread -pthread examples/threads.c -o build/threads-tsan
 ./build/threads-tsan
@@ -59,6 +97,7 @@ Do not combine that command with AddressSanitizer. A clean execution is evidence
 If the remaining question concerns matcher state, stop where input is processed. Build an unoptimized copy for easier source-level inspection:
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -g -O0 \
   capstone/sift.c capstone/matcher.c -o build/sift-debug
 printf 'before\nneedle\nafter\n' > debug-input.txt
@@ -77,7 +116,7 @@ continue
 quit
 ```
 
-These commands inspect state and the call path. Linux users preferring GDB can use `break matcher_feed`, `run`, `info locals`, `backtrace`, `next`, and `continue`. Consult the [LLDB tutorial](https://lldb.llvm.org/use/tutorial.html) for its interface.
+At function entry, inspect the arguments: `length` tells you how many input bytes this call may consume, and `m` points to the persistent state. Use `frame variable *m` to inspect that state, then step through the transitions of interest. These commands are a starting point, not a script that automatically locates the defect. Linux users preferring GDB can use `break matcher_feed`, `run`, `info locals`, `print *m`, `backtrace`, `next`, and `continue`. Consult the [LLDB tutorial](https://lldb.llvm.org/use/tutorial.html) for its interface.
 
 State your expected value before inspecting it. If the partial-match length should be three after `nee`, an observed zero narrows the fault to a transition already passed. Watching arbitrary variables until something looks surprising provides weaker guidance.
 
@@ -111,9 +150,18 @@ time ./build/sift needle measure-input.txt > /dev/null
 
 This no-match search should exit with status 1. It is a completed search, not a failure. Whole-process elapsed time includes startup and I/O; it does not isolate the matcher. Later runs may encounter cached file data. Do not call them storage-throughput measurements without controlling the storage and cache conditions.
 
-Use the same compiler options and identical inputs when comparing variants. Alternate or randomize the order of baseline and candidate runs so background drift is less likely to favor one consistently. Record all repetitions, not only the best. Record the machine, revision, compiler, options, input, timing boundary, and observed spread. No universal throughput number follows from this experiment.
+Use the same compiler options and identical inputs when comparing variants. Alternate or randomize the order of baseline and candidate runs so background drift is less likely to favor one consistently. Record all repetitions, not only the best. Keep correctness and timing in the same record:
 
-For an internal elapsed interval, use compatible readings of a monotonic clock. Wall-clock corrections are not work performed by your algorithm. Clock resolution and timestamp-call overhead still matter for short intervals. [Clock semantics](https://man7.org/linux/man-pages/man2/clock_gettime.2.html)
+| Record | Why it is needed |
+| --- | --- |
+| Revision, compiler, options, and actual buffer size | Identifies the implementation being compared |
+| Input identity, size, and match distribution | Identifies the work requested |
+| Output comparison and exit status | Establishes that the intended work completed |
+| Timing boundary, run order, machine, and all elapsed times | Makes variation and environmental differences visible |
+
+Report the observed spread as well as a typical time. No universal throughput number follows from this experiment.
+
+For an internal elapsed interval, take the start and end readings from the same monotonic clock. Subtracting wall-clock timestamps can mix clock corrections with the time spent doing work. Clock resolution and timestamp-call overhead still matter for short intervals. [Clock semantics](https://man7.org/linux/man-pages/man2/clock_gettime.2.html)
 
 ## Check whether the measured work still exists
 

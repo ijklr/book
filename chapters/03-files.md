@@ -6,7 +6,7 @@ That single change from Chapter 2 removes the need to remember the entire input.
 
 ## Write down the conditions for the promise
 
-Our program, `copyfd`, uses ordinary blocking byte-stream operations. It assumes usable standard descriptors and exclusive responsibility for their stream positions while copying. An unrelated writer sharing the output can interleave its own bytes; an unrelated reader sharing input can consume bytes we never see. The tool cannot promise an uncontaminated copy while another actor changes the very stream being copied.
+Our program, `copyfd`, uses ordinary blocking byte-stream operations. It assumes usable standard descriptors and exclusive responsibility for consuming input and producing output while copying. An unrelated writer sharing the output can interleave its own bytes; an unrelated reader sharing input can consume bytes we never see. For seekable files, another actor can also change a shared offset. These conditions belong in the contract because the copy loop cannot enforce them on its own.
 
 | Statement | Its role |
 | --- | --- |
@@ -28,23 +28,25 @@ A tempting larger-buffer implementation performs one read, one write of everythi
 
 ## Derive state from conservation of bytes
 
-For one chunk, store `len`, the valid byte count, and `done`, the count already emitted. The pending region is `[done, len)`. Its invariant is `0 <= done <= len <= capacity`, and it must remain unchanged until those pending bytes have been emitted or the operation has failed.
+For one chunk, store `len`, the valid byte count, and `done`, the count already accepted by the output. The pending region is `[done, len)`, with the invariant `0 <= done <= len <= capacity`. That region shrinks as writes succeed. Its bytes must remain available and unchanged until accepted by the output or the copy fails.
 
-Conceptually, during successful copying, total bytes read equal total bytes emitted plus bytes still pending. These totals are useful reasoning variables; the implementation need not store ever-growing counters. The bounded pair `len` and `done` contains enough information for the next action.
+Conceptually, during successful copying, total bytes read equal bytes accepted by the output plus bytes still pending. These totals let us check the accounting; the implementation need not store ever-growing counters. The bounded pair `len` and `done` contains enough information for the next action.
 
-A successful output of `n` bytes changes only `done`, increasing it by `n`. When `done == len`, there are no pending bytes, so the array can safely receive the next input chunk. The program must not read into that array earlier. This is the ownership rule connecting the two loops.
+A write that accepts `n` bytes increases `done` by `n` and leaves `len` unchanged. When `done == len`, there are no pending bytes, so the array can safely receive the next input chunk. The program must not read into that array earlier. This is the ownership rule connecting the two loops.
 
-Separate safety from progress. Bounds ensure that an output request refers to live bytes in the pending region. For progress, use `len - done` as a decreasing measure: each positive write reduces it. An interrupted call with no reported progress leaves it unchanged. A zero result for a nonempty request cannot support either advancement or an endless retry, so the implementation treats it as an error.
+Separate safety from progress. Bounds ensure that an output request refers to live bytes in the pending region. For progress, track `len - done`: each positive write reduces the bytes remaining. An interrupted call with no reported progress leaves that count unchanged. A zero result for a nonempty request supplies no progress, so this implementation treats it as an error instead of advancing the offset or retrying indefinitely.
 
 The proof is conditional. A blocking operation may wait indefinitely, and a repeated interruption need not eventually stop. This program has no overall deadline. “Every positive result decreases remaining work” is a useful statement; “this loop always finishes quickly” would be unsupported.
 
 ## Read the result before classifying the event
 
-A file descriptor is a nonnegative integer naming a process-local reference to an operating-system-managed endpoint. For an ordinary file, the underlying open file description carries state such as the offset. Copying the integer into another variable does not create a new descriptor. The standard descriptor constants are `STDIN_FILENO`, `STDOUT_FILENO`, and `STDERR_FILENO`.
+A file descriptor is a nonnegative integer naming a process-local reference to an operating-system-managed endpoint. The standard descriptors are 0, 1, and 2, named by `STDIN_FILENO`, `STDOUT_FILENO`, and `STDERR_FILENO`. Their numbers describe their conventional roles, not the kinds of objects connected to them: standard input might be a file or a pipe.
+
+For an ordinary file, the descriptor refers to an *open file description*, which carries state such as the current offset. Copying the descriptor integer into another C variable creates a second copy of the number, not a new resource. Closing through either variable makes that number invalid for both unless a later operation reuses it. Chapter 5 examines how distinct descriptors can also share an open file description.
 
 A C `FILE *` also carries library stream state and buffering. Mixing buffered operations and descriptor operations on the same connection requires coordination because a library stream may already hold data the descriptor-level code cannot see. Our data path avoids that additional state.
 
-For a positive-size `read`, a positive result is the count obtained and minus one denotes failure. This copier treats zero as the end of its input, as appropriate for regular files, pipes, and ordinary connected stream sockets. A short success is not itself EOF. These return rules are documented in the [read manual](https://man7.org/linux/man-pages/man2/read.2.html). Store the result in `ssize_t`; converting a negative failure result to `size_t` before testing it destroys the distinction between count and error.
+For a positive-size `read`, a positive result is the count obtained and minus one denotes failure. This copier treats zero as the end of its input, as appropriate for regular files, pipes, and ordinary connected stream sockets. A short success is not itself EOF: a pipe can supply the bytes currently available while its writer remains open. These return rules are documented in the [read manual](https://man7.org/linux/man-pages/man2/read.2.html). Store the result in `ssize_t`; converting a negative failure result to `size_t` before testing it destroys the distinction between count and error.
 
 Do not generalize that zero-result interpretation to every device configuration. A noncanonical terminal with `VMIN = 0` can return zero because no byte arrived before its timer expired, even with `O_NONBLOCK` clear. Such terminal modes need a different input policy and are outside this copier's contract. [Terminal read modes](https://man7.org/linux/man-pages/man3/termios.3.html)
 
@@ -68,26 +70,54 @@ Then trace reads returning 4, then 3, then zero, even though every request asked
 
 The small signal setup makes a broken output pipe observable through an error return by ignoring `SIGPIPE`. Otherwise the default signal action normally terminates the writer. That is explicit process policy, explained in Chapter 7, rather than part of the byte-conservation argument.
 
+## Follow the bytes through a short-write trace
+
+Suppose one read has filled the first eight array slots with `ABCDEFGH`. Set `len = 8` and `done = 0`. A scripted output endpoint returns the results below; each positive result accepts that many bytes from the beginning of the requested range.
+
+| Call | Requested bytes | Result | `done` afterward | Output accepted so far | Pending bytes |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `ABCDEFGH`, length 8 | 2 | 2 | `AB` | `CDEFGH` |
+| 2 | `CDEFGH`, length 6 | `-1`, `EINTR` | 2 | `AB` | `CDEFGH` |
+| 3 | `CDEFGH`, length 6 | 3 | 5 | `ABCDE` | `FGH` |
+| 4 | `FGH`, length 3 | 3 | 8 | `ABCDEFGH` | Empty |
+
+After each row, accepted bytes plus pending bytes still account for the original eight. The actual requests are `data + done` and `len - done`: the pointer advances exactly as the count shrinks. Call 2 repeats call 1's *remaining suffix*, because the interruption reported no progress. It does not restart the whole chunk.
+
+Notice what the implementation does not need to do. It does not erase `AB`, shift `CDEFGH` to the beginning, or allocate a new array. The bytes can stay where they are; two integers describe which part still matters. After call 4 the whole array becomes reusable, even though it still physically contains the previous bytes.
+
+**Predict:** replace call 4 with a fatal error that accepts no further bytes. What remains in the output, what does `done` mean, and may the copier claim success because all eight bytes were read? Separately, suppose call 3 returns 3 while `errno` still contains `EINTR` from call 2. Which observation controls the next request?
+
+:::reveal Review the transfer trace
+
+The failing version has accepted only `ABCDE`; `FGH` remains pending when `write_all` returns failure. Reading a byte and delivering it are separate events, so consuming all input does not establish a complete copy. The command reports failure and cannot retract the accepted prefix. A zero result on call 4 also fails under this implementation's no-progress policy.
+
+The positive count from call 3 controls the transition even if `errno` still says `EINTR`. Advance to offset 5 and request three bytes. Retrying from offset 2 would duplicate `CDE`. Inspecting `errno` only after the documented failure result prevents an old error from undoing new progress.
+
+:::
+
 ## Cleanup has a different contract
 
 Do not generalize an I/O retry rule into “retry every interrupted system call.” A close operation releases a reference whose numeric identifier can be reused. If release already happened, a retry might act on a different resource assigned the same integer.
 
-Interrupted-close behavior differs across standards editions and implementations. Linux releases the descriptor even when reporting `EINTR`, whereas POSIX.1-2024 specifies different behavior. The [close manual](https://man7.org/linux/man-pages/man2/close.2.html) explains this divergence. Our short-lived command attempts each close once, reports failure, and exits; termination releases any remaining descriptors. This is a stated policy for this program, not a portable resource-management recipe for a long-lived library.
+Interrupted-close behavior differs across standards editions and implementations. Linux releases the descriptor even when reporting `EINTR`, whereas POSIX.1-2024 requires the descriptor to remain open on that error. The [close manual](https://man7.org/linux/man-pages/man2/close.2.html) explains this divergence. Our short-lived command attempts each close once, reports failure, and exits; termination releases any remaining descriptors. This is a stated policy for this program, not a portable resource-management recipe for a long-lived library.
 
 The command returns zero only after successful copying and its checked closes; detected operational failures return 1 and arguments are rejected with 2. A failure may leave an output prefix. Status communicates that the copy did not complete; it cannot retract bytes already accepted downstream. Even success does not establish durable storage.
 
 ## Make the tests target the reasoning
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Wpedantic -Werror -g examples/copyfd.c -o build/copyfd
 printf 'one\ntwo\n' > build/copy-input.txt
 ./build/copyfd < build/copy-input.txt > build/copy-output.txt
+printf 'copy status=%s\n' "$?"
 cmp build/copy-input.txt build/copy-output.txt
+printf 'comparison status=%s\n' "$?"
 printf 'A\000B\n' | ./build/copyfd | od -An -tx1
 ./build/copyfd < /dev/null > build/copy-empty.txt
 ```
 
-These cases check whole-output equality, a byte that string operations can mishandle, and EOF without a data chunk. They do not force short writes. Large input alone also does not prove every partial-transfer path executed; a scripted transfer substitute is more decisive for that property.
+These cases check whole-output equality, a byte that string operations can mishandle, and EOF without a data chunk. Capture the copier's status before running `cmp`: matching bytes alone do not show that checked cleanup succeeded. The binary pipeline makes byte values visible, but its shell status ordinarily belongs to the final `od` command. None of these cases forces short writes; a scripted transfer substitute is more decisive for that property.
 
 For a performance experiment, derive a prediction before changing the buffer. In a model where every transfer supplies or accepts the full requested chunk, copying 1 MiB through a 16 KiB array needs 64 data reads, 64 writes, and one read to discover EOF: 129 transfer calls. A one-byte array needs 2,097,153. Short transfers and interruptions increase those counts. This explains one possible source of savings without predicting the same ratio in elapsed time; waiting for an endpoint may dominate either version.
 

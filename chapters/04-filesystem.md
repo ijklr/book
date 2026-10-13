@@ -2,7 +2,9 @@
 
 A pathname looks like the identity of a file because we use names to discuss files. The operating system's model is more subtle. A name is part of a directory structure that can change. An open descriptor refers to an object obtained through an earlier operation. Understanding that distinction explains hard links, symbolic links, renaming, and a large class of race conditions.
 
-Our `fileinfo` tool reports metadata for one pathname. It distinguishes a symbolic link from its target and lists the immediate names inside a directory. It does not create, remove, or rename entries, or write file contents. Observation can still affect metadata: reading a directory can update its access timestamp. [POSIX directory-read semantics](https://man7.org/linux/man-pages/man3/readdir.3p.html)
+Design `fileinfo PATH` to report metadata for one pathname. If the initial lookup identifies a symbolic link, report metadata for both the link and its target. If it identifies a directory, list that directory's immediate entry names. For `fileinfo link`, a symbolic link to a directory receives the two metadata reports but no listing. This policy separates inspecting a link's target from traversing it.
+
+The tool returns 0 after completing the requested inspection, 1 for a detected operational failure, and 2 for invalid arguments. It does not create, remove, or rename entries, or write file contents. Observation can still affect metadata: reading a directory can update its access timestamp. [POSIX directory-read semantics](https://man7.org/linux/man-pages/man3/readdir.3p.html)
 
 ## Separate a name from an object
 
@@ -14,7 +16,15 @@ The device and inode fields together help identify filesystem objects within the
 
 ## Ask the right metadata question
 
-`stat(path, ...)` normally follows the final symbolic link and reports the target. `lstat(path, ...)` reports the final link itself when that component is a symbolic link. `fstat(fd, ...)` reports the object associated with an open descriptor. The [stat family manual](https://man7.org/linux/man-pages/man2/stat.2.html) documents these distinctions and metadata fields.
+Choose the operation from the object you mean to inspect:
+
+| Question | Operation |
+| --- | --- |
+| What does this pathname resolve to, following its final symbolic link? | `stat(path, ...)` |
+| What does this pathname name, without following a final symbolic link? | `lstat(path, ...)` |
+| What object does this open descriptor refer to? | `fstat(fd, ...)` |
+
+The [stat family manual](https://man7.org/linux/man-pages/man2/stat.2.html) documents these distinctions and metadata fields.
 
 The word “final” matters. `lstat` does not prohibit symbolic links in earlier pathname components. Nor is it a complete defense against concurrent pathname changes. It answers a particular metadata question at a particular operation.
 
@@ -22,11 +32,9 @@ The program initially calls `lstat`. For a symbolic link, it also calls `stat` a
 
 Metadata is interpreted according to object type. For a regular file, `st_size` is the logical byte length. A directory's size is not its number of entries. Use `S_ISREG`, `S_ISDIR`, and related predicates to inspect `st_mode`; do not compare the entire mode value to a file-type constant, because the value also includes other bits.
 
-{{include:examples/fileinfo.c}}
-
 ## Directory iteration is a separate protocol
 
-`opendir` creates a `DIR *` stream. Repeated `readdir` calls yield entries. The returned pointer is borrowed from the stream implementation; consume or copy the name before later operations invalidate or replace it. Finish with `closedir`, which owns the underlying directory descriptor. Do not separately close the result of `dirfd` while the stream owns it.
+`opendir` creates a directory stream, represented by a `DIR *`. Repeated `readdir` calls yield entries. The returned pointer is borrowed from the stream implementation; consume or copy the name before the next `readdir` on that stream can overwrite it, and before closing the stream. Saving the pointer alone does not save the name. The stream owns the underlying directory descriptor, and `closedir` releases both. Do not separately close the result of `dirfd` while the stream owns it.
 
 The null result from `readdir` has two meanings: end of directory or failure. Set `errno` to zero immediately before the call, then inspect it only if the result is null. That pattern belongs to this interface; it is not a general reason to inspect `errno` after every successful function. The [readdir manual](https://man7.org/linux/man-pages/man3/readdir.3.html) describes the distinction and the returned entry's lifetime.
 
@@ -34,13 +42,26 @@ Directory order is unspecified for our purposes. It may look stable during repea
 
 The listing skips `.` and `..`, and it does not recurse. A recursive walker needs policy for symbolic links, cycles, permission failures, directory replacement, and resource limits. Adding a recursive call without answering those questions is not a complete traversal design.
 
-Names can contain spaces, newlines, and bytes your terminal interprets as commands. The listing therefore quotes each name and escapes bytes outside a small printable set. Non-ASCII names remain represented by their bytes, not converted into a claim about Unicode characters. This format is for inspection; it is not a shell command to execute.
+Names can contain spaces, newlines, and control sequences interpreted by a terminal. The listing therefore quotes each name and escapes bytes outside a small printable set. Non-ASCII names remain represented by their bytes; the program does not decode them as Unicode. This format is for inspection; it is not a shell command to execute.
+
+## Derive it yourself
+
+Before opening the reference, draw the decision tree for a regular file, directory, symbolic link to a file, symbolic link to a directory, and dangling symbolic link. For each case, identify the metadata operations and whether directory iteration runs. Which failure can occur after some normal output has already been printed?
+
+Then trace resource ownership through `opendir`, `fstat`, `readdir`, and `closedir`. Once `opendir` succeeds, every later exit path must attempt to release that stream. A failed metadata lookup does not remove that obligation. Decide whether retaining all entry names serves any requirement of this unsorted, nonrecursive listing.
+
+:::reveal Reference implementation
+
+{{include:examples/fileinfo.c}}
+
+:::
 
 ## Build an experiment directory
 
 These commands use a freshly generated directory so they do not overwrite existing files:
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Wpedantic -Werror -g examples/fileinfo.c -o build/fileinfo
 lab_dir=$(mktemp -d)
 printf 'abc' > "$lab_dir/original"
@@ -78,6 +99,41 @@ Consider a proposed fix: “Check the pathname twice before opening it.” Deriv
 
 For the narrower requirement “report metadata for the object I opened,” derive the operations from that sentence: open, then inspect the descriptor. A separate preliminary pathname check adds no guarantee of that identity. Test the distinction with a controlled pause between lookup and open, replacing the name during the pause. One forced counterexample disproves the repeated-check argument more directly than thousands of runs in which the timing happens to cooperate.
 
+## Keep an object open while its name changes
+
+Make the distinction observable without relying on a race. In a separate scratch directory, create two regular files with different contents. The parenthesized commands run in a subshell, so their saved descriptor is local to this experiment:
+
+```sh
+rename_dir=$(mktemp -d)
+printf 'old\n' > "$rename_dir/current"
+printf 'new\n' > "$rename_dir/replacement"
+(
+    exec 3< "$rename_dir/current"
+    mv "$rename_dir/replacement" "$rename_dir/current"
+    printf 'saved descriptor: '
+    cat <&3
+    printf 'new pathname: '
+    cat "$rename_dir/current"
+    exec 3<&-
+)
+```
+
+Here `exec` has no program argument: it establishes descriptor 3 in the subshell. `cat <&3` reads through that saved connection; `cat "$rename_dir/current"` opens the pathname again. Both files are in the same directory, so the replacement is a rename within one filesystem. Assume no other process changes these files and each operation succeeds.
+
+Call the original object A and the replacement B. Opening `current` first obtains a reference to A. Renaming then makes `current` name B and removes A's directory entry. The existing descriptor still refers to A; it is not a promise to repeat the lookup of `current` before each read. POSIX keeps an unlinked object's contents available while open references remain. [Rename semantics](https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html)
+
+The two lines therefore report `old` and `new`. A later `fileinfo "$rename_dir/current"` inspects B. An `fstat` on saved descriptor 3 would inspect A. This is the same distinction behind the example's separate `name` and `opened-directory` metadata reports.
+
+**Predict:** insert a second `cat <&3` immediately after the first. Does it read `old` again, read `new`, or print no bytes? Explain both which object it reaches and where reading begins.
+
+:::reveal Review the saved descriptor
+
+The second read prints no bytes. The first `cat` has advanced the shared open file description's offset to EOF in A. Reusing the descriptor preserves both its object reference and that offset; it does not reopen A at the beginning. A fresh open of `current` reaches B at its own initial offset.
+
+Closing descriptor 3 releases the remaining saved reference. The rename changed a directory entry, while reads changed an offset. Keeping these transitions separate explains the result without assuming that a pathname permanently identifies an object.
+
+:::
+
 ## Exercises
 
 1. Append one byte through `alias` in the experiment directory. Inspect `original` and `shortcut` again. Predict which metadata sizes and contents change before running the commands.
@@ -88,6 +144,12 @@ For the narrower requirement “report metadata for the object I opened,” deri
 
 ## Selected answers
 
+:::reveal Review after your attempt
+
+Every valid invocation begins with `lstat`. A regular file needs no further metadata lookup. A symbolic link adds `stat`, even when its target is a directory; a missing target causes failure after the link's own metadata has been printed. A directly named directory adds `opendir`, `fstat` on the opened descriptor, iteration, and `closedir`. The streaming listing needs only the current borrowed entry; sorting would introduce a reason to retain names.
+
 In exercise 1, `printf 'd' >> "$lab_dir/alias"` changes the shared regular file to four bytes. Both hard-link names and the symbolic link's target observe those contents. The symbolic link object's own stored target remains `original`; its own size does not become four.
 
 For exercise 2, mask ordinary permission bits with `0777` if those nine bits are what your output promises. Special permission bits require an explicit additional policy. For exercise 3, `fstatat(dirfd(dir), entry->d_name, &st, AT_SYMLINK_NOFOLLOW)` inspects the final entry without following its final symbolic link. Include `<fcntl.h>` for the flag. Check failure normally: an entry returned earlier is not a promise that its name still exists, and concurrent replacement can change which object it resolves to.
+
+:::

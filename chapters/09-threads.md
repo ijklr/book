@@ -8,27 +8,36 @@ These requirements come before threads or locks. They describe an accounting pro
 
 Our **application contract** requires exactly 100,000 increments on success. Our **model** is that workers may be delayed between any operations; source-code order in one worker does not schedule another. The **platform contract** supplies shared memory, thread creation, and synchronization operations. Our **design choice** is to use a mutex for the common counter. An observed total of 100,000 on your machine is one execution that agrees with the contract. It is not the reason the design is correct.
 
-Three plausible implementations deserve consideration. One execution path can do all the work, avoiding coordination. Separate worker counters can be combined after the workers finish, avoiding competing writes. A shared counter can be protected during each update, providing the live common state we requested. The final-only variant would often favor private counters; this chapter intentionally retains the live-total requirement to study a shared invariant. None of these architectures acquires a speed advantage merely from its name.
+Several implementations deserve consideration:
+
+| Design | Requirement it can satisfy | Coordination it needs |
+| --- | --- | --- |
+| One worker | Exact final and live totals. | No concurrent counter access. |
+| Per-worker counters | Exact final total after combining results. | A completion boundary before reading each worker's result. |
+| Shared atomic counter | Exact updates to this one common counter. | Atomic operations for competing reads and updates; valid storage throughout. |
+| Shared counter under a mutex | Exact updates to a common state that can include several related fields. | One locking rule for the entire protected transition. |
+
+Where C11 atomics are supported, `atomic_fetch_add()` on an atomic integer can express the single-counter update without an application mutex. Atomic operations are not necessarily implemented without locks, and several atomic fields do not automatically form one atomic transaction. This chapter uses a mutex because the same reasoning extends to balances, queues, and other relationships among fields. Neither choice guarantees a speed advantage. [C11 draft N1570, sections 7.17.5 and 7.17.7.5](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
 
 Before optimizing that shared update, find the decision that needs it. Suppose “live total” came from a dashboard that refreshes once a second. That refresh interval alone does not tell us whether the displayed count may lag, must be exact at each refresh, or must account for an operation before its completion is acknowledged. Those are different contracts, even if their screenshots look alike.
 
-If the owner accepts delayed progress reports and an exact final result, workers can accumulate contributions privately and publish batches through a synchronized protocol. This removes some shared updates but introduces unpublished work and a rule for publishing the final partial batch. If acknowledgement requires the contribution to be committed first, batching cannot preserve immediate acknowledgement without further changes. Write the permitted delay before selecting a batch size. The first-principles step is to challenge why each shared update exists; deleting it is valid only after the resulting behavior satisfies the agreed requirement. This chapter keeps the original per-increment contract.
+If delayed progress reports are acceptable, workers can accumulate contributions privately and publish batches through a synchronized protocol. That reduces shared updates but creates unpublished work and a final partial batch to handle. If an operation must enter the common total before it is acknowledged as complete, batching must delay acknowledgement too. Specify the permitted delay before selecting a batch size. This chapter keeps the original per-increment contract.
 
-Threads share a process's globals, heap, and descriptors, while having separate stacks and execution state. That platform arrangement makes a shared pointer possible. It does not answer when the pointed-to object may be read or destroyed. Those are obligations of our design.
+Threads share a process's address space and descriptors, while having separate stacks and execution state. Separate stacks do not make their objects inaccessible to other threads: the sample passes workers a pointer to an object on `main`'s stack. Its storage must remain alive, and accesses to it must follow the synchronization protocol.
 
 ## Break the obvious implementation on paper
 
-Suppose both workers execute `++count` without synchronization. Before reading further, write a trace for two increments starting at seven. Represent each increment as a read, an addition, and a write. State the expected mathematical result, then find an ordering of those steps that loses an update.
+Suppose two workers execute `++count` without synchronization. Before reading further, write a trace for two increments starting at seven. Represent each increment as a read, an addition, and a write. State the expected mathematical result, then find an ordering of those steps that loses an update.
 
 :::reveal Review the counterexample
 
-Worker A reads seven; worker B reads seven; A stores eight; B stores eight. Two attempted contributions leave eight in this simplified machine model. This exposes the missing coordination, but it is not a complete prediction of an actual C program. Unsynchronized conflicting accesses, at least one a write, form a data race when the C rules' ordering and atomicity requirements are absent. A data race gives undefined behavior. The implementation does not promise only a sometimes-wrong count.
+Worker A reads seven; worker B reads seven; A stores eight; B stores eight. Two attempted contributions leave eight in this simplified machine model. This exposes the missing coordination, but it is not a complete prediction of an actual C program. These unsynchronized accesses to an ordinary shared variable form a data race: different threads access the same location, at least one writes, and no synchronization orders the accesses. A data race gives undefined behavior, so a sometimes-wrong count is not the only possible outcome.
 
 :::
 
 The repair must therefore establish a valid ordering, not merely make the illustrated schedule less likely. `volatile` does not make an increment atomic or synchronize threads. Adding a sleep changes timing without creating the necessary relationship. Running a million successful trials does not add an ordering edge either.
 
-We need an indivisible state transition relative to the other workers. A mutex is a supplied mechanism for exclusive access and memory synchronization. All accesses that participate in the shared-counter protocol must follow the same rule: hold this mutex while workers can modify the counter. A hardware intuition about cache coherence cannot replace the C and pthread contracts.
+We need an indivisible state transition relative to the other workers. A **mutex** permits one thread at a time to own a lock; the operations performed while it owns that lock form a **critical section**. Locking also provides memory synchronization. While workers can modify the ordinary counter, every read or write of that counter must hold the same mutex. Protecting writers alone would leave an unlocked progress display with a data race. [POSIX memory synchronization](https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap04.html)
 
 ## Derive the state and the invariant
 
@@ -67,7 +76,9 @@ count=100000 expected=100000
 
 The Makefile uses `-pthread` when compiling and linking this program. The option expresses thread support to the toolchain; do not assume that naming a library alone is equivalent on every target.
 
-Compare your failure path with `started`. If creation fails, earlier workers continue, and the parent joins exactly those whose identifiers were produced successfully. Only then does it destroy the mutex. The pointer into `main`'s stack is valid because its owner remains active through all joins. Moving the object to the heap would not remove that lifetime obligation.
+Compare your failure path with `started`, the number of workers successfully created. If creation fails, earlier workers continue, and the main thread joins exactly those workers. Only then does it destroy the mutex. The shared object on `main`'s stack remains alive through all joins, so the workers' pointers to it stay valid. Moving the object to the heap would not remove that lifetime obligation.
+
+`pthread_create()` passes the pointer value; it does not copy the object the pointer designates. Initialize each argument before creating its worker, because the worker may run immediately. If workers need separate arguments, keep one stable object per worker. Passing every worker the address of a changing creation-loop variable would give them shared mutable state, not separate snapshots. [POSIX thread arguments](https://pubs.opengroup.org/onlinepubs/000095399/functions/pthread_create.html)
 
 The pthread creation and join interfaces return an error number directly rather than using `-1` plus `errno`. The program therefore passes that returned value to `strerror`. It treats unexpected synchronization errors as fatal to this small process; a library would need an explicit propagation policy. Successful joining establishes that the selected worker has terminated. [POSIX thread creation](https://man7.org/linux/man-pages/man3/pthread_create.3p.html), [POSIX joining](https://man7.org/linux/man-pages/man3/pthread_join.3p.html)
 
@@ -83,7 +94,7 @@ The sample makes no speedup claim. A useful hypothesis would be: “For independ
 
 ## Derive waiting from a queue predicate
 
-Now change the problem: a consumer must wait until a queue contains an item or has been permanently closed. Busy checking wastes execution time while nothing changes. A fixed sleep adds delay and still supplies no state synchronization. We want to suspend until progress may be possible.
+Now change the problem: a consumer must wait until a queue contains an item or has been permanently closed. A predicate is a condition on shared state; here, `queue.count > 0 || queue.closed` lets the consumer proceed. Repeatedly checking an unchanged queue wastes execution time. A fixed sleep adds delay and still supplies no state synchronization. We want to suspend until progress may be possible.
 
 A naive plan checks `queue.count == 0`, unlocks, then sleeps awaiting a notification. Predict the failure if the producer inserts and notifies between that unlock and the start of the wait. Another naive plan keeps the mutex locked while sleeping. Predict why the producer cannot repair the empty queue in that version.
 
@@ -99,7 +110,33 @@ while (queue.count == 0 && !queue.closed)
 pthread_mutex_unlock(&queue.mutex);
 ```
 
-The queue state remembers whether work exists. The notification merely tells sleepers to reconsider. A producer changes state under the same mutex and signals. Closing sets `closed` under the mutex and broadcasts so every waiting consumer can discover that no more work will arrive. Without a closing state, an empty queue cannot distinguish “wait for a future item” from “there will never be another item.”
+### Trace a wakeup that finds no item
+
+Let consumer A be waiting on an empty, open queue. Consumer B is processing an earlier item outside the queue lock. The producer adds one new item, `X`, and signals while holding the mutex. Choose a schedule in which A is awakened but B reaches the mutex first after the producer releases it:
+
+| Step | Mutex owner | Protected queue state | What consumer A can do |
+| --- | --- | --- | --- |
+| Producer inserts `X`. | Producer | One item; open. | Remain asleep until notified. |
+| Producer signals. | Producer | One item; open. | Become eligible to resume, but cannot yet own the mutex. |
+| Producer unlocks; B acquires. | B | One item; open. | Still wait to reacquire the mutex. |
+| B removes `X` and unlocks. | None | Empty; open. | Compete for the mutex. |
+| A reacquires; its wait returns. | A | Empty; open. | Recheck the predicate and wait again. |
+
+The notification did not reserve `X` for A. Replacing `while` with `if` would let A continue as though an item existed, potentially reading an empty slot or decrementing a zero count. This schedule needs no spurious wakeup; ordinary competition is enough to require the loop. [POSIX condition waiting](https://pubs.opengroup.org/onlinepubs/9799919799/functions/pthread_cond_clockwait.html)
+
+Now inspect A's next wait. It checks the empty state while owning the mutex. A producer cannot change that protected state yet. When A calls `pthread_cond_wait()`, releasing the mutex and beginning the wait form one coordinated transition relative to a producer that acquires the mutex and then signals. There is no exposed interval equivalent to “unlock, then call a separate sleep.” An item present at A's locked check prevents it from waiting; a producer that inserts after the wait transition can wake it. The predicate and the coordinated wait cover both orders.
+
+**Predict:** both consumers are now waiting on an empty queue. The owner closes the queue but uses `pthread_cond_signal()` once instead of broadcasting. The program no longer submits items. Is eventual termination of both consumers guaranteed? Does changing the waiting loop to `while (queue.count == 0)` help?
+
+:::reveal Review the shutdown schedule
+
+One signal need only wake one waiter. The other may remain asleep indefinitely because there will be no further state changes or notifications. Broadcasting makes every current waiter reconsider the closing state. Each then reacquires the mutex and sees `closed && count == 0`, allowing an ordinary return. A loop that tests only emptiness would send even awakened consumers back to sleep: closure must be part of the predicate as well as a reason to notify.
+
+:::
+
+The queue state remembers whether work exists. The notification merely tells sleepers to reconsider. A producer changes state under the same mutex and signals. Closing sets `closed` under the mutex and broadcasts so every waiting consumer can discover that no more work will arrive. Consumers still remove items from a closed queue until it is empty; only then are they finished. Without a closing state, an empty queue cannot distinguish “wait for a future item” from “there will never be another item.”
+
+Use `signal` when one newly available item lets one waiting consumer proceed. Use `broadcast` for closure because every waiting consumer must recheck its exit condition. Neither operation transfers mutex ownership or stores a notification for future waiters. A later consumer examines the persistent queue state before deciding whether to wait. [POSIX condition notifications](https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_broadcast.html)
 
 This is also why cooperative shutdown is attractive: workers leave through ordinary control flow and release owned resources. Thread cancellation introduces additional questions about the locks and objects owned at the interruption point.
 

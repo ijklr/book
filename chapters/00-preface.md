@@ -8,29 +8,39 @@ First-principles study edition · October 2026
 
 Why does a copier need a loop around a successful write? What information must survive when a message arrives in several pieces? Why can a pipe reader wait forever even after the program that produced its input has exited? These questions have answers you can derive from a small set of contracts and an accounting of state.
 
-This book teaches systems programming through that work. You will start with a problem and constraints, identify what must remain true, compare possible designs, and construct a case that defeats an incomplete explanation. Only then will you inspect an implementation. The goal is to make your design decisions explainable, including the conditions under which you would change them.
+This book teaches systems programming by asking you to make and defend design decisions. Start with a problem, identify what must remain true, compare designs, and try to break your explanation. Then inspect the reference implementation. You should be able to explain both why a design works and what would make you change it.
 
-You already know basic C: functions, loops, structures, pointers, and simple allocation. The thirteen chapters develop user-space systems programming on macOS and Linux: memory, file I/O, filesystem objects, processes, pipes, signals, mappings, threads, sockets, event loops, debugging, and a complete search tool. Kernel implementation, device drivers, and embedded hardware remain outside this volume.
+The book assumes basic C: functions, loops, structures, pointers, and simple allocation. Its thirteen chapters cover user-space systems programming: programs that use operating-system services to manage memory, files, processes, communication, and concurrency. The examples target macOS and Linux. Kernel implementation, device drivers, and embedded hardware are outside this volume.
+
+## Choose a reading route
+
+| Your starting point | Route through the book | Evidence to keep |
+| --- | --- | --- |
+| Basic C, little systems experience | Read the reasoning method, then Chapters 1–13 in order. Use Appendix B to pace the labs. | A working experiment and an explanation of its state, ownership, and failure behavior. |
+| Prior systems experience | Attempt a relevant task in Appendix E before consulting its chapter. Return to the foundation where the attempt exposes a gap. | Your independent attempt, the first failed assumption, and a checked correction. |
+| Preparation for a particular role | Use Appendix D to choose a role family and language bridge. Add Appendix F when scheduling, retries, or evaluation are relevant. | One complete project you can defend and adapt to a changed requirement. |
+
+The chapters build in stages: Chapters 1–4 establish process interfaces, memory, and files; Chapters 5–9 develop resource lifetimes across execution and concurrency; Chapters 10–11 extend those ideas to protocols and event loops. Chapter 12 develops the evidence needed to investigate a program, and Chapter 13 combines the foundation in `sift`. Use the contents to return to a specific topic after the first pass.
 
 ## Begin with the reasoning method
 
-Read [A method for reasoning from first principles](#a-method-for-reasoning-from-first-principles) before Chapter 1. It supplies the central practice: distinguish a requirement from a contract, an assumption from an observation, and a necessary consequence from a design choice. Its worked example derives the limits of a bounded recorder before choosing a queue.
+Read [A method for reasoning from first principles](#a-method-for-reasoning-from-first-principles) before Chapter 1. Its recorder example shows how requirements determine necessary state and expose impossible promises. On a first reading, focus on that argument; return to the thread-coordination details after Chapter 9.
 
-Each chapter then applies that practice to a different problem. You will encounter a design question before a reference implementation, an explicit state or ownership argument, a concrete failure trace, and an exercise that changes an assumption. The chapter does not claim its final design is the only possible one. Part of your task is to explain when an alternative would be preferable.
+Each chapter follows the same learning sequence: attempt a design question, trace state and ownership, challenge a failure case, and change one assumption. Compare your design with the reference and explain when either would be preferable.
 
-At selected decisions, pause one step before implementation: does the requested result require this work at all? A copy, a supervisor process, a shared counter, or a stored line may be necessary under one contract and removable under another. Derive that distinction, estimate the cost it creates, and choose an experiment that could overturn your explanation. These are opportunities to practice first-principles thinking while learning the system itself.
+Worked examples use small byte sequences, resource counts, and event schedules so you can inspect each transition. Cover the next row of a trace and compute it yourself. Then explain the rule that produced it: which bytes remain pending, which reference keeps a resource alive, or which predicate permits a thread to proceed? The nearby prediction questions and folded reviews let you check that explanation before taking on the larger exercises.
+
+Before implementing a mechanism, ask which requirement makes it necessary. A copy, supervisor process, shared counter, or stored line may be removable when the caller needs a different result. Estimate the cost of keeping it, and identify the promise you would break by removing it.
 
 In the browser edition, **reference code and selected review answers are folded away**. Write your prediction or initial design before opening them. You can expand all sections when using the book as a reference. The Markdown edition contains the same material; folding support depends on the reader. Printing from the browser expands the sections so the exported book includes the complete source and answers.
 
-Keep your own work in `WORKBOOK.md` or another notebook. The workbook is not regenerated by `make book`. Record the requirement, trusted contracts, assumptions, candidate designs, invariant, predicted counterexample, and observed result. After an experiment, write what changed in your explanation and what remains uncertain.
-
-Writing your own book means becoming responsible for these arguments. A chapter you can defend includes more than a paraphrase of a successful program. It explains which facts support the design, why an initially plausible alternative fails or costs more, and which changed requirement would force a revision.
+Keep your predictions, designs, observations, and corrections in `WORKBOOK.md` or another notebook. The workbook is not regenerated by `make book`. Appendix B provides a session template. Preserve failed predictions: explaining why one failed is part of learning the system.
 
 ## Use the reference programs deliberately
 
 The examples are complete, runnable experiments with narrow contracts. The TCP server handles one connection; the pipe experiment has finite input; the mapping example assumes a stable file. These limits make whole lifecycles inspectable. Transfer exercises ask you to identify what must change when a limit is removed.
 
-The larger project is **sift**, a command-line search tool. Its derivation begins with unknown input size, arbitrary read boundaries, line-based reporting, and a memory budget independent of line length. Those constraints lead to a stateful matcher. You will compare representations, justify a fallback rule, and connect the algorithm's guarantees to I/O that can fail.
+The final project is **sift**, a command-line search tool that reports matching line numbers without storing whole lines. Unknown input sizes and arbitrary read boundaries force the matcher to retain just enough state between reads. You will derive that state, justify its update rules, and connect the algorithm to I/O that can fail.
 
 The runnable source is included directly from `examples/` and `capstone/`. Edit those files and individual chapter files, then run `make book` to rebuild `BOOK.md` and `BOOK.html`. Avoid putting your only copy of new writing in the assembled manuscript, which that command replaces.
 
@@ -38,9 +48,9 @@ The runnable source is included directly from `examples/` and `capstone/`. Edit 
 
 The source requests **C17** and a conservative set of **POSIX** facilities shared by macOS and Linux, using `_POSIX_C_SOURCE=200809L`. These are chosen interface baselines. A feature-test macro requests declarations; it does not implement an unavailable interface.
 
-ISO C describes language behavior. POSIX describes operating-system interfaces. Platform documentation describes the implementation you run. These are external contracts to investigate, not conclusions you can reconstruct solely from a picture of hardware. A familiar physical model does not overrule an object-lifetime rule or a platform's documented error semantics.
+ISO C describes language behavior; POSIX specifies operating-system interfaces; platform documentation describes the implementation you run. Reason from the relevant contract. A hardware intuition cannot override a C lifetime rule or a documented error condition.
 
-Experiments provide another kind of evidence. The reference programs were built and exercised on macOS; `VALIDATION.md` records those checks and their limits. Linux compatibility is a target awaiting separate execution evidence. Preserve that distinction in your own notes rather than treating one machine's observation as a universal result.
+The reference programs were built and exercised on macOS; `VALIDATION.md` records those checks and their limits. Linux compatibility awaits separate execution evidence. Record your environment so that an observation on one machine does not become an unsupported portability claim.
 
 ## Run the book
 
@@ -60,10 +70,10 @@ Chapter commands assume this directory is current. Executables are in `build/`. 
 
 ## Connect this practice to your larger goal
 
-For a demanding engineering role, the ability to derive, debug, and revise an unfamiliar design matters beyond completing these chapters. [Appendix D](#appendix-d--build-toward-demanding-engineering-roles) maps this foundation to engineering paths at HRT, OpenAI, Anthropic, and other firms with comparable technical work. Choose a role family before choosing a specialization: backend infrastructure, inference performance, and research engineering have overlapping foundations but different next steps.
+[Appendix D](#appendix-d--build-toward-demanding-engineering-roles) connects this foundation to engineering paths at HRT, OpenAI, Anthropic, and other firms. Choose a role family first: backend infrastructure, inference performance, and research engineering share fundamentals but require different further study.
 
-[Appendix E](#appendix-e--an-independent-systems-assessment) provides six core tasks and three optional assessments for services and AI infrastructure. [Appendix F](#appendix-f--from-c-systems-to-ai-infrastructure) develops worked arguments about scheduling, retries, and evaluation, then introduces a Python and ML study path. You can attempt its systems labs on a local CPU. C makes ownership and operating-system boundaries explicit here; additional language and ML practice should follow the role you choose.
+[Appendix E](#appendix-e--an-independent-systems-assessment) provides six core tasks and three optional assessments. [Appendix F](#appendix-f--from-c-systems-to-ai-infrastructure) works through scheduling, retries, and evaluation, then introduces a Python and ML study path. Its systems labs run on a local CPU.
 
-Use the assessment to decide where you need more practice. Its tasks and the chapter exercises are original learning material, not an employer's interview questions or an offer prediction. The advanced units include project specifications and completion criteria; their full reference implementations are outside this volume. The employer sources are a dated guide to relevant work. Recheck the actual role and candidate instructions when applying.
+Use the assessments to choose what to practice next. They are original learning material, not employer questions or hiring predictions. The advanced projects supply specifications and completion criteria for your own implementations. Employer sources are dated; recheck the role and candidate instructions when applying.
 
-For each study session, leave behind one argument you can defend and one useful question that remains. When a reference solution differs from your design, identify which assumption or tradeoff explains the difference. That comparison is often the most valuable part of the chapter.
+Leave each session with one argument you can defend and one useful question to investigate next.

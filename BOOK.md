@@ -8,29 +8,39 @@ First-principles study edition · October 2026
 
 Why does a copier need a loop around a successful write? What information must survive when a message arrives in several pieces? Why can a pipe reader wait forever even after the program that produced its input has exited? These questions have answers you can derive from a small set of contracts and an accounting of state.
 
-This book teaches systems programming through that work. You will start with a problem and constraints, identify what must remain true, compare possible designs, and construct a case that defeats an incomplete explanation. Only then will you inspect an implementation. The goal is to make your design decisions explainable, including the conditions under which you would change them.
+This book teaches systems programming by asking you to make and defend design decisions. Start with a problem, identify what must remain true, compare designs, and try to break your explanation. Then inspect the reference implementation. You should be able to explain both why a design works and what would make you change it.
 
-You already know basic C: functions, loops, structures, pointers, and simple allocation. The thirteen chapters develop user-space systems programming on macOS and Linux: memory, file I/O, filesystem objects, processes, pipes, signals, mappings, threads, sockets, event loops, debugging, and a complete search tool. Kernel implementation, device drivers, and embedded hardware remain outside this volume.
+The book assumes basic C: functions, loops, structures, pointers, and simple allocation. Its thirteen chapters cover user-space systems programming: programs that use operating-system services to manage memory, files, processes, communication, and concurrency. The examples target macOS and Linux. Kernel implementation, device drivers, and embedded hardware are outside this volume.
+
+## Choose a reading route
+
+| Your starting point | Route through the book | Evidence to keep |
+| --- | --- | --- |
+| Basic C, little systems experience | Read the reasoning method, then Chapters 1–13 in order. Use Appendix B to pace the labs. | A working experiment and an explanation of its state, ownership, and failure behavior. |
+| Prior systems experience | Attempt a relevant task in Appendix E before consulting its chapter. Return to the foundation where the attempt exposes a gap. | Your independent attempt, the first failed assumption, and a checked correction. |
+| Preparation for a particular role | Use Appendix D to choose a role family and language bridge. Add Appendix F when scheduling, retries, or evaluation are relevant. | One complete project you can defend and adapt to a changed requirement. |
+
+The chapters build in stages: Chapters 1–4 establish process interfaces, memory, and files; Chapters 5–9 develop resource lifetimes across execution and concurrency; Chapters 10–11 extend those ideas to protocols and event loops. Chapter 12 develops the evidence needed to investigate a program, and Chapter 13 combines the foundation in `sift`. Use the contents to return to a specific topic after the first pass.
 
 ## Begin with the reasoning method
 
-Read [A method for reasoning from first principles](#a-method-for-reasoning-from-first-principles) before Chapter 1. It supplies the central practice: distinguish a requirement from a contract, an assumption from an observation, and a necessary consequence from a design choice. Its worked example derives the limits of a bounded recorder before choosing a queue.
+Read [A method for reasoning from first principles](#a-method-for-reasoning-from-first-principles) before Chapter 1. Its recorder example shows how requirements determine necessary state and expose impossible promises. On a first reading, focus on that argument; return to the thread-coordination details after Chapter 9.
 
-Each chapter then applies that practice to a different problem. You will encounter a design question before a reference implementation, an explicit state or ownership argument, a concrete failure trace, and an exercise that changes an assumption. The chapter does not claim its final design is the only possible one. Part of your task is to explain when an alternative would be preferable.
+Each chapter follows the same learning sequence: attempt a design question, trace state and ownership, challenge a failure case, and change one assumption. Compare your design with the reference and explain when either would be preferable.
 
-At selected decisions, pause one step before implementation: does the requested result require this work at all? A copy, a supervisor process, a shared counter, or a stored line may be necessary under one contract and removable under another. Derive that distinction, estimate the cost it creates, and choose an experiment that could overturn your explanation. These are opportunities to practice first-principles thinking while learning the system itself.
+Worked examples use small byte sequences, resource counts, and event schedules so you can inspect each transition. Cover the next row of a trace and compute it yourself. Then explain the rule that produced it: which bytes remain pending, which reference keeps a resource alive, or which predicate permits a thread to proceed? The nearby prediction questions and folded reviews let you check that explanation before taking on the larger exercises.
+
+Before implementing a mechanism, ask which requirement makes it necessary. A copy, supervisor process, shared counter, or stored line may be removable when the caller needs a different result. Estimate the cost of keeping it, and identify the promise you would break by removing it.
 
 In the browser edition, **reference code and selected review answers are folded away**. Write your prediction or initial design before opening them. You can expand all sections when using the book as a reference. The Markdown edition contains the same material; folding support depends on the reader. Printing from the browser expands the sections so the exported book includes the complete source and answers.
 
-Keep your own work in `WORKBOOK.md` or another notebook. The workbook is not regenerated by `make book`. Record the requirement, trusted contracts, assumptions, candidate designs, invariant, predicted counterexample, and observed result. After an experiment, write what changed in your explanation and what remains uncertain.
-
-Writing your own book means becoming responsible for these arguments. A chapter you can defend includes more than a paraphrase of a successful program. It explains which facts support the design, why an initially plausible alternative fails or costs more, and which changed requirement would force a revision.
+Keep your predictions, designs, observations, and corrections in `WORKBOOK.md` or another notebook. The workbook is not regenerated by `make book`. Appendix B provides a session template. Preserve failed predictions: explaining why one failed is part of learning the system.
 
 ## Use the reference programs deliberately
 
 The examples are complete, runnable experiments with narrow contracts. The TCP server handles one connection; the pipe experiment has finite input; the mapping example assumes a stable file. These limits make whole lifecycles inspectable. Transfer exercises ask you to identify what must change when a limit is removed.
 
-The larger project is **sift**, a command-line search tool. Its derivation begins with unknown input size, arbitrary read boundaries, line-based reporting, and a memory budget independent of line length. Those constraints lead to a stateful matcher. You will compare representations, justify a fallback rule, and connect the algorithm's guarantees to I/O that can fail.
+The final project is **sift**, a command-line search tool that reports matching line numbers without storing whole lines. Unknown input sizes and arbitrary read boundaries force the matcher to retain just enough state between reads. You will derive that state, justify its update rules, and connect the algorithm to I/O that can fail.
 
 The runnable source is included directly from `examples/` and `capstone/`. Edit those files and individual chapter files, then run `make book` to rebuild `BOOK.md` and `BOOK.html`. Avoid putting your only copy of new writing in the assembled manuscript, which that command replaces.
 
@@ -38,9 +48,9 @@ The runnable source is included directly from `examples/` and `capstone/`. Edit 
 
 The source requests **C17** and a conservative set of **POSIX** facilities shared by macOS and Linux, using `_POSIX_C_SOURCE=200809L`. These are chosen interface baselines. A feature-test macro requests declarations; it does not implement an unavailable interface.
 
-ISO C describes language behavior. POSIX describes operating-system interfaces. Platform documentation describes the implementation you run. These are external contracts to investigate, not conclusions you can reconstruct solely from a picture of hardware. A familiar physical model does not overrule an object-lifetime rule or a platform's documented error semantics.
+ISO C describes language behavior; POSIX specifies operating-system interfaces; platform documentation describes the implementation you run. Reason from the relevant contract. A hardware intuition cannot override a C lifetime rule or a documented error condition.
 
-Experiments provide another kind of evidence. The reference programs were built and exercised on macOS; `VALIDATION.md` records those checks and their limits. Linux compatibility is a target awaiting separate execution evidence. Preserve that distinction in your own notes rather than treating one machine's observation as a universal result.
+The reference programs were built and exercised on macOS; `VALIDATION.md` records those checks and their limits. Linux compatibility awaits separate execution evidence. Record your environment so that an observation on one machine does not become an unsupported portability claim.
 
 ## Run the book
 
@@ -60,13 +70,13 @@ Chapter commands assume this directory is current. Executables are in `build/`. 
 
 ## Connect this practice to your larger goal
 
-For a demanding engineering role, the ability to derive, debug, and revise an unfamiliar design matters beyond completing these chapters. [Appendix D](#appendix-d--build-toward-demanding-engineering-roles) maps this foundation to engineering paths at HRT, OpenAI, Anthropic, and other firms with comparable technical work. Choose a role family before choosing a specialization: backend infrastructure, inference performance, and research engineering have overlapping foundations but different next steps.
+[Appendix D](#appendix-d--build-toward-demanding-engineering-roles) connects this foundation to engineering paths at HRT, OpenAI, Anthropic, and other firms. Choose a role family first: backend infrastructure, inference performance, and research engineering share fundamentals but require different further study.
 
-[Appendix E](#appendix-e--an-independent-systems-assessment) provides six core tasks and three optional assessments for services and AI infrastructure. [Appendix F](#appendix-f--from-c-systems-to-ai-infrastructure) develops worked arguments about scheduling, retries, and evaluation, then introduces a Python and ML study path. You can attempt its systems labs on a local CPU. C makes ownership and operating-system boundaries explicit here; additional language and ML practice should follow the role you choose.
+[Appendix E](#appendix-e--an-independent-systems-assessment) provides six core tasks and three optional assessments. [Appendix F](#appendix-f--from-c-systems-to-ai-infrastructure) works through scheduling, retries, and evaluation, then introduces a Python and ML study path. Its systems labs run on a local CPU.
 
-Use the assessment to decide where you need more practice. Its tasks and the chapter exercises are original learning material, not an employer's interview questions or an offer prediction. The advanced units include project specifications and completion criteria; their full reference implementations are outside this volume. The employer sources are a dated guide to relevant work. Recheck the actual role and candidate instructions when applying.
+Use the assessments to choose what to practice next. They are original learning material, not employer questions or hiring predictions. The advanced projects supply specifications and completion criteria for your own implementations. Employer sources are dated; recheck the role and candidate instructions when applying.
 
-For each study session, leave behind one argument you can defend and one useful question that remains. When a reference solution differs from your design, identify which assumption or tradeoff explains the difference. That comparison is often the most valuable part of the chapter.
+Leave each session with one argument you can defend and one useful question to investigate next.
 
 # Contents
 
@@ -95,11 +105,11 @@ For each study session, leave behind one argument you can defend and one useful 
 
 Suppose someone asks you to build a fast message queue. It is tempting to reach for a familiar implementation, or to search for a clever one. Begin earlier: what does fast mean, which messages must survive, who produces and consumes them, and what happens when the consumer cannot keep up?
 
-First-principles reasoning in this book means making your starting points explicit and building an argument from them. Some starting points are requirements. Others are mathematical facts, language rules, operating-system contracts, or assumptions you have chosen for a model. You then derive consequences, compare designs, and test the uncertain parts.
+First-principles reasoning means stating what you know and deriving what follows. In this book, the starting points include requirements, mathematical facts, language rules, operating-system contracts, and explicit model assumptions. Use them to compare designs and identify what still needs testing.
 
 In a 2013 interview, Elon Musk describes first-principles reasoning as starting with fundamental truths and building conclusions from them. He also explains that the effort makes it worth applying selectively to important problems. That is the habit we will practice at consequential design decisions throughout this book. [Elon Musk interviewed by Alaina G. Levine, APS News](https://www.aps.org/apsnews/2013/10/profiles-in-versatility)
 
-For systems programming, the exercise is concrete: question an inherited requirement, identify the facts that constrain a solution, estimate necessary work, and build a small experiment around the uncertain step. The derivations below are our applications of that habit. Their justification comes from the argument, contracts, and evidence you can inspect.
+The derivations below apply that habit to systems programming. Their justification comes from the contracts, arguments, and evidence you can inspect.
 
 ## Start at a useful boundary
 
@@ -142,11 +152,11 @@ A cost model separates work forced by the result from work introduced by a desig
 
 Write units beside every estimate: bytes retained, calls made, records per second, or seconds waiting. Label idealized bounds and measured values separately. A lower bound identifies work a design cannot avoid under its model; it does not promise an implementation can reach that bound. System-call costs, scheduling, failure handling, and interactions between stages can account for a gap.
 
-This gives optimization a direction: remove work whose purpose has disappeared, simplify what remains, then measure the suspected limit. In the following chapters, apply the question to intermediate buffers, parent processes, shared counters, and network framing. Reuse familiar designs when they meet the contract; reopen their assumptions when a changed workload or requirement makes the cost matter.
+This gives optimization a direction: remove work whose purpose has disappeared, simplify what remains, then measure the suspected limit. Reuse familiar designs when they meet the contract; revisit their assumptions when the workload or requirements change.
 
 ## A repeatable reasoning cycle
 
-Use the following sequence while studying and designing. It is a tool for exposing missing reasoning, not a form you must mechanically fill out for every line of code.
+Use the following sequence for a design decision or an investigation. An **invariant** is a property that must hold at specified boundaries, such as before and after each queue operation. A **progress argument** explains what lets the next step happen: a consumer must run and remove an item before a producer waiting on a full queue can proceed. State both; correct stored values alone do not explain whether the program will finish.
 
 1. **Define the result.** State observable inputs, outputs, success, failure, and resource limits. Replace adjectives such as fast, safe, and robust with questions you can evaluate. If a request prescribes a mechanism, ask which outcome requires it.
 2. **State the starting facts.** Separate requirements, external contracts, assumptions, and observations. Investigate a contract when uncertainty about it could invalidate your design.
@@ -157,7 +167,7 @@ Use the following sequence while studying and designing. It is a tool for exposi
 7. **Test and revise.** Use proof for consequences of a model and experiments for claims about an implementation or environment. Preserve failures as tests.
 8. **Transfer the idea.** Change one requirement and work out which conclusions still hold. This distinguishes an understood argument from a memorized implementation.
 
-The state step is often decisive. A partial write forces you to remember progress somewhere, but it does not force a particular variable name or data structure. A delayed callback forces a decision about who retains the unaccepted event. The purpose of the derivation is to expose necessary information and tradeoffs, not to pretend there is only one possible program.
+A partial write forces you to remember progress, but it does not prescribe a variable name or data structure. A delayed callback forces you to decide who retains the unaccepted event. Derive the necessary information first, then choose its representation.
 
 ## Worked derivation: a recorder with a slow consumer
 
@@ -206,9 +216,48 @@ Let `head` identify the next record to remove, and let `count` be the number pen
 the logical queue occupies count slots starting at head, wrapping at B
 ```
 
-The next insertion position is mathematically `(head + count) mod B`. In C, the implementation must also justify the integer arithmetic; mathematical addition and machine addition are different contracts. A bounded capacity and checked arithmetic, or an equivalent branch that avoids overflow, can make the representation valid.
+The next insertion position is mathematically `(head + count) mod B`. For example, with `B = 4`, `head = 3`, and `count = 2`, the pending records occupy slots 3 and 0, and the next insertion uses slot 1. In C, the implementation must also justify the integer arithmetic; mathematical addition and machine addition are different contracts. A bounded capacity and checked arithmetic, or an equivalent branch that avoids overflow, can make the representation valid.
 
 At empty, `count == 0`; at full, `count == B`. A design storing only equal head and tail positions cannot distinguish those two states without another rule. It could reserve a slot, store a count, or add a phase bit. The apparent implementation detail is a consequence of needing to distinguish two observable states.
+
+Trace a capacity-two queue before adding threads. Start with `head = 0` and advance it only when removing an item:
+
+| Event | `head` afterward | `count` afterward | Pending records, oldest first |
+| --- | --- | --- | --- |
+| Insert A into slot 0 | 0 | 1 | A |
+| Insert B into slot 1 | 0 | 2 | A, B |
+| Attempt to insert C; wait for space | 0 | 2 | A, B |
+| Remove A; slot 0 becomes reusable | 1 | 1 | B |
+| Complete C's insertion into slot 0 | 1 | 2 | B, C |
+
+The blocked attempt changes no queue state. It becomes an accepted record only when its insertion completes. That distinction connects the public promise to the representation.
+
+## Turn a trace into an invariant argument
+
+The five-row trace explains one execution. To justify every permitted sequence of queue operations, we need an argument that survives the next operation, whatever that operation is. This is the practical use of an invariant.
+
+Start by making the content claim explicit: the sequence delivered so far is a prefix of the sequence accepted so far. Reading the `count` occupied slots from `head`, wrapping at `B`, gives exactly the remaining suffix, in order. These sequences are part of our reasoning; the implementation does not have to retain the entire history. The numeric bounds alone would not establish this claim. A queue could keep `count` in range while overwriting a record or returning the wrong one.
+
+Now check three obligations, still treating operations as indivisible events:
+
+1. **Establish the invariant.** With `head = 0`, `count = 0`, and positive capacity, both bounds hold. The logical sequence is empty, matching the absence of accepted records.
+2. **Preserve it on insertion.** Insert only when `count < B`. The slot immediately after the logical sequence is free; write the new record there, then increase `count`. All old records keep their order and the new record becomes the newest. The count remains at most `B`. A full-queue wait changes none of this state.
+3. **Preserve it on removal.** Remove only when `count > 0`. Return the record at `head`, advance `head` by one with wraparound, and decrease `count`. The returned record was the oldest; the remaining sequence has its previous order. The count remains nonnegative.
+
+Initialization establishes the claim, and every allowed transition preserves it. Repeating those transitions therefore preserves the claim for any finite operation sequence. That is an induction argument, expressed in the terms an implementation must satisfy. It assumes the arithmetic is valid and the slot operations do what we specified; concurrency adds further obligations.
+
+**Predict before continuing:** a capacity-two queue contains A then B. A faulty removal returns B, leaves A pending, and decreases `count` from 2 to 1. Which part of the invariant detects the bug? Would checking only the bounds detect it?
+
+<details>
+<summary>Review the strength of the invariant</summary>
+
+
+The bounds still hold, but removal delivered the newest record before the oldest. The content-and-order claim fails. A useful invariant must connect the stored representation to the caller's promise; a valid array index alone says nothing about FIFO delivery.
+
+The argument also does not show that a waiting producer ever runs again. That is a progress obligation, considered next.
+
+
+</details>
 
 Now add multiple threads. A producer cannot expose the incremented count before the inserted record is ready for a consumer, and two producers cannot independently claim the same slot. The representation requires a coordinated state transition. A mutex is one way to enforce it; a more specialized atomic algorithm needs its own proof. Calling the queue lock-free does not supply that proof.
 
@@ -249,13 +298,11 @@ For a 60-minute study session, use this adaptable allocation:
 | 45–55 minutes | Comparison with the reference reasoning and a corrected explanation |
 | 55–60 minutes | One changed-assumption question to attempt in a later session |
 
-This is a suggested routine, not a validated learning-rate claim. Some labs need several sessions. Preserve an incomplete attempt so you can see where the reasoning stopped. Looking up a contract is part of the work; copying a finished design answers a different question about your current skill.
-
-In the browser edition, reference implementations and selected review material are initially folded away. Write a prediction before opening them. The Markdown edition also contains these sections inside disclosure blocks; readers that do not support folding still show their contents. Print mode expands the browser edition so the exported book remains complete.
+Adjust these times to the problem; some labs need several sessions. Preserve an incomplete attempt so you can see where the reasoning stopped. Looking up a contract is part of the work. Before opening the folded reference material, save your prediction and design so you can distinguish what you derived from what the reference taught you.
 
 ## Know when to revise and when to stop
 
-Review the central design in a chapter using the six questions below. This is the book's review standard, informed by the published first-principles approach discussed above; it is not a test supplied by Elon Musk or evidence of his approval.
+Review a chapter's central design using these six questions. They are this book's application of the reasoning method, not an externally certified assessment.
 
 | Review question | Evidence the explanation must supply |
 | --- | --- |
@@ -272,7 +319,7 @@ For example, a proposed explanation that says “mapping removes explicit reads,
 
 Apply the same standard to a design suggested by an expert: identify which premises and evidence support it. Fix a discovered defect, then revisit the affected reasoning. A review passes when all six questions have adequate answers within the stated scope, including clearly bounded conditional claims.
 
-This stopping rule does not establish that no future refinement exists. A new workload, platform, or requirement can expose a missing case. Record unresolved uncertainty separately from finished work so that it remains visible without making every task endless.
+Record unresolved uncertainty and move on when the stated scope is supported. A new workload, platform, or requirement may give you a concrete reason to reopen the design.
 
 ## Derive it yourself
 
@@ -296,7 +343,7 @@ Returning a pointer into a replaceable slot adds a lifetime problem. The display
 
 A test harness launches the same executable twice. One invocation should succeed; the other should deliberately return a chosen failure status. A person wants a readable account of each run, while the harness needs a result it can interpret without reading English. Design a command for both callers.
 
-Call it `identity [STATUS]`. It should report its process and account identifiers, its argument list, and the requested status. It accepts at most one optional decimal status from 0 through 125. Invalid arguments produce a diagnostic and status 2. A detected output error takes precedence over the requested status and produces status 1. Otherwise the command returns the requested status, defaulting to zero. This is a small program with several observable promises, not simply a request to print some numbers.
+Call it `identity [STATUS]`. It reports its process and account identifiers, its argument list, and the requested status. It accepts at most one optional decimal status from 0 through 125. Invalid arguments produce a diagnostic and status 2. A detected output error takes precedence over the requested status and produces status 1. Otherwise the command returns the requested status, defaulting to zero. Even this small program needs a contract for input, output, and failure.
 
 ## Decide what the environment gives you
 
@@ -312,15 +359,19 @@ You cannot derive an operating-system interface from a preference for simple des
 
 A program describes computation. An executable file contains code and information needed to run it on a particular platform. A process is an instance with memory, execution state, and operating-system resources. Running one executable twice creates separate instances whose arguments and connections can differ. This distinction explains why recompiling is unnecessary to request a different exit status.
 
+In `main(int argc, char **argv)`, `argc` counts argument strings and `argv` points to their array. The arguments occupy indices below `argc`; `argv[argc]` is a null pointer, not another string to print. In our shell examples, `argv[0]` names the invocation and `argv[1]`, when present, holds the requested status. The startup contract appears in section 5.1.2.2.1 of the [WG14 C committee draft](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf).
+
 The kernel manages shared resources and enforces access between processes. Ordinary C code runs in user space. A library interface may enter the kernel, perform work locally, or combine both. Formatting an integer is library work; delivering the resulting characters eventually involves the operating system. One C function call does not imply one system call.
 
 ## Compare two interfaces before implementing either
 
-One plausible design prints `success` or `failure` and always exits zero. A human can read it, but the harness must now parse text. If a diagnostic changes language or wording, the harness can break. Worse, an output failure can erase the only result. This design does not satisfy our machine-readable completion requirement.
+One plausible design prints `success` or `failure` and always exits zero. A human can read it, but the harness must now parse text whose wording needs its own stable contract. An output failure can also erase the only reported result. Most directly, always exiting zero violates the promise to return the requested status. Text can form a machine-readable protocol, but it does not fulfill that particular promise.
 
 A second design returns a status and prints everything to the same output stream. That gives the harness a result, but a caller saving normal output also saves argument-error messages. A consumer expecting records must distinguish data from diagnostics.
 
-We choose three channels: normal records on standard output, diagnostics on standard error, and a bounded exit status for completion. That choice follows from our callers' needs; another application could legitimately choose a structured message protocol instead. Separating channels does not ensure that every message reaches a human. If the diagnostic destination fails too, the command has no additional guaranteed reporting channel.
+We choose three channels: normal reports on standard output, diagnostics on standard error, and a bounded exit status for completion. The report is for a person; it prints argument strings directly, so an argument containing a newline can span several lines. It is not an unambiguous serialization of the argument list. The harness uses the status instead of parsing this display.
+
+This contract deliberately allows overlapping meanings: status 1 can mean “the caller requested 1” or “output failed.” A harness that must distinguish those cases needs a revised status scheme or an additional structured result. Separating data from diagnostics also cannot guarantee delivery: if standard error fails, there is no further guaranteed reporting channel.
 
 The shell connects these channels before our code runs. Therefore argument validation cannot protect a preexisting file from a shell redirection that already truncated it. Keep responsibility with the component that performs the action.
 
@@ -330,9 +381,9 @@ Test the uncertain assumption with a small harness that discards normal output, 
 
 ## Derive the minimum state and error precedence
 
-The only persistent decision is the requested status. Parsing also needs a temporary result and evidence about which input characters were consumed. Process identifiers can be retrieved and printed without retaining a history of earlier runs. Keeping such a history would add state without serving this contract.
+The requested status must survive parsing so completion can return it. Parsing also needs a temporary result and evidence about which input characters were consumed. Process identifiers can be retrieved and printed without retaining a history of earlier runs. Keeping such a history would add state without serving this contract.
 
-Our control flow has three phases: validate, report, complete. The invariant before reporting is that the status is representable and within our chosen range. The invariant during argument output is that only entries below `argc` are accessed. Completion must select the strongest detected outcome: invalid syntax prevents reporting; a later detected output failure overrides an otherwise valid requested status.
+Our control flow has three phases: validate, report, complete. Before reporting, the status must be representable and within our chosen range. During argument output, each accessed index `i` must satisfy `0 <= i < argc`. These are invariants: properties that must hold at the relevant stage. Status selection follows the stated precedence: invalid arguments return 2 before normal reporting; a detected output failure returns 1; otherwise completion returns the requested status.
 
 Consider an apparently convenient conversion that maps unrecognized text to zero. Both `0` and `nonsense` could then lead to success. Information lost at conversion cannot be recovered by a later range check. We need separate evidence for whether conversion started, where it stopped, and whether its result was representable.
 
@@ -348,7 +399,7 @@ Then predict this sequence without running it: request status 7, run another suc
 
 `getpid` and `getppid` obtain the process and parent identifiers. These identifiers describe current process relationships, not permanent identities across time. The [process identification manual](https://man7.org/linux/man-pages/man2/getpid.2.html) documents those interfaces and Linux-specific details. `getuid` and `getgid` report real account identifiers, not a complete authorization model.
 
-The reference uses `strtol`. It checks a reported conversion error, an unchanged end pointer, trailing characters, and the accepted range. Its chosen grammar permits the leading whitespace and optional sign recognized by `strtol`, provided the numeric result is 0–125; it rejects trailing text, including trailing spaces. In particular, textual `-0` is accepted because its value is zero. A stricter decimal grammar would need explicit lexical validation.
+The reference uses `strtol` with base 10. It clears `errno` before conversion, then checks for a conversion error, an unchanged end pointer, trailing characters, and an out-of-range value. Its grammar permits leading whitespace and an optional sign, provided the numeric result is 0–125; it rejects trailing text, including trailing spaces. Thus `" +7"` and `"007"` request 7, `"7 "` is invalid, and `"-0"` requests zero. A stricter decimal grammar would need explicit lexical validation.
 
 Types such as `pid_t` and `uid_t` belong to the platform interface. Converting to `intmax_t` or `uintmax_t` and using the corresponding `j` format modifier gives the variadic print function the type it expects. A number that looks small does not justify passing the wrong argument type.
 
@@ -425,16 +476,51 @@ cc build/identity.o -o build/identity
 
 An object file can contain unresolved references. Linking connects references to definitions and produces an executable. A header supplies declarations; including `<stdio.h>` does not paste the implementation of `printf` into your source. Source portability also does not imply binary portability: compile separately for macOS and Linux.
 
-Now test the channel design using scratch paths:
+## Follow the shell, the program, and the observer
+
+The three result channels become easier to distinguish when you follow one invocation in order. Use scratch paths and assume the file operations below succeed:
 
 ```sh
-./build/identity 0 > build/identity.txt
+printf 'before\n' > build/identity.txt
+./build/identity 7 > build/identity.txt 2> build/identity.err
+saved_status=$?
+printf 'saved status=%s\n' "$saved_status"
 cat build/identity.txt
+printf 'status after cat=%s\n' "$?"
+```
+
+| Step | Component acting | Result |
+| --- | --- | --- |
+| Prepare redirections | Shell | Truncate `identity.txt`; open `identity.err` for diagnostics |
+| Validate `7` | `identity` | Retain the requested status; produce no diagnostic |
+| Format and flush the report | `identity` | Put the report in `identity.txt` |
+| Complete | `identity`, then shell | Return 7; make that status available through `$?` |
+| Save the status | Shell | Store 7 in `saved_status` before another command replaces `$?` |
+| Display the file | `cat` | Print the report and return its own status, normally 0 |
+
+The two printed status lines therefore contain 7 and 0. They describe different commands. The variable preserves the first value; `$?` is not a history of past results. The initial `before` line has disappeared because truncation happened before `identity` wrote anything. Neither the shell's redirection operators nor the output filenames become arguments to `identity`; the shell uses them to establish its connections. These rules belong to the [shell command language](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html).
+
+Now predict the same destinations after validation fails:
+
+```sh
 ./build/identity bad > build/identity.txt 2> build/identity.err
+saved_status=$?
+printf 'saved status=%s\n' "$saved_status"
 cat build/identity.err
 ```
 
-Record both the command's result and the resulting files. Do not infer a program's success solely from the absence of visible terminal output. Redirection has changed where evidence appears.
+Before running it, answer three questions. Does the earlier successful report remain in `identity.txt`? Which command actually makes the diagnostic visible on the terminal? Would an empty `identity.err` alone establish that the requested status was zero?
+
+<details>
+<summary>Review the channel trace</summary>
+
+
+The failed invocation leaves `identity.txt` empty: the shell has already truncated it, and argument validation returns before normal reporting. `identity` writes the diagnostic into `identity.err`; the later `cat` copies it onto the terminal. The saved status is 2 even if `cat` subsequently returns zero.
+
+An empty diagnostic file establishes neither a zero status nor successful completion. In the first run it accompanies the deliberately requested status 7. Inspect the channel that actually carries the fact you need. A complete report and a nonzero status are compatible under this command's contract.
+
+
+</details>
 
 ## Exercises and a changed requirement
 
@@ -468,7 +554,7 @@ For the transfer task, a central durable allocator moves uniqueness enforcement 
 
 Design a command that accepts arbitrary bytes from standard input and reproduces them exactly on standard output, but emits no input bytes until collection has completed successfully. If reading or storage allocation fails, report failure and discard the collected data. Input length is not known in advance. This version may use growing memory, but no temporary file.
 
-Those requirements explain why this chapter buffers an entire input. Streaming each chunk immediately would save memory, but would violate the decision to withhold output: if the third read failed, the first two chunks would already have escaped. We will change that requirement in Chapter 3. Do not mistake one chapter's chosen constraint for a universal recommendation to buffer files.
+Those requirements explain why this chapter buffers an entire input. Streaming each chunk immediately would save memory, but if the third read failed, the first two chunks would already have escaped. Here successful collection means reaching end-of-file without a read or allocation failure. Chapter 3 will relax the output-timing requirement and derive a different design.
 
 ## Find the cost forced by the requirement
 
@@ -476,7 +562,7 @@ For arbitrary binary input, compression cannot guarantee a small representation 
 
 An unlimited-input promise also cannot guarantee success on a finite machine. Our contract must permit failure when storage or representable sizes are exhausted. This is a requirement correction, not an implementation defect. A program that silently truncates the input would be changing the requested result instead.
 
-Within those constraints, compare two representations. A fixed array is simple and predictable but introduces a maximum accepted length. A linked list of chunks avoids moving earlier chunks, at the cost of per-chunk metadata and a less convenient contiguous view. A growable contiguous array gives us simple indexing and one allocation to own, but growth can relocate it. We choose the third representation to study that tradeoff; it is not the only correct design.
+Within those constraints, compare three representations. A fixed array is simple and predictable but introduces a maximum accepted length. A linked list of chunks avoids moving earlier chunks, at the cost of per-chunk metadata and a less convenient contiguous view. A growable contiguous array gives us simple indexing and one allocation to own, but growth can relocate it. We choose the third representation to study that tradeoff; it is not the only correct design.
 
 ## Separate language facts from allocation policy
 
@@ -490,17 +576,17 @@ Within those constraints, compare two representations. A fixed array is simple a
 
 C describes objects, types, storage duration, and observable behavior. “Stack” and “heap” describe usual implementations, not mandatory physical regions. A local array generally has automatic storage duration; a file-scope object or local `static` has static storage duration. Allocated storage remains usable according to the allocation interface's lifetime rules. Copying a pointer does not extend the pointed-to object's lifetime.
 
-We use ownership as a design agreement: one component must eventually release an allocation. Other components borrow access for a specified interval. C does not enforce that agreement, so control flow and interface contracts must make it reviewable.
+We use ownership as a design agreement: one component is responsible for releasing an allocation. Other components borrow access for a specified interval. Copying a pointer creates another way to reach the same storage; it does not create another allocation or another independent right to free it. C does not enforce ownership, so control flow and interface contracts must make the agreement reviewable.
 
 ## Derive what must be remembered
 
 To reproduce the input, we need an allocation reference and the number of stored bytes. To reuse spare allocation space without repeatedly asking for more, we also retain capacity. Capacity is optimization state; correctness could instead use an exact-size allocation after each append.
 
-Let `len` count stored bytes and `cap` count allocated byte slots. The invariant is `0 <= len <= cap`. Positive capacity means a live allocation of at least that size; our empty state uses zero capacity and a null pointer. The first `len` bytes contain exactly the accumulated input. Spare slots are not input, even if they happen to contain convenient values.
+Let `len` count stored bytes and `cap` count allocated byte slots. Both use `size_t`, the unsigned type used for object sizes. The invariant is `0 <= len <= cap`. Positive capacity means a live allocation of at least that size; our initial and destroyed states use zero capacity and a null pointer. The first `len` bytes contain exactly the accumulated input. Spare slots are not input, even if they happen to contain convenient values.
 
 An append operation must preserve the existing prefix, copy the new suffix, and publish the new length only after that suffix exists. Reserving space may change the allocation but must not change the logical input. Destruction releases the allocation and returns the object to its empty state. These transitions explain the functions we need before we decide their names.
 
-Why not recover length with `strlen`? An input consisting of bytes `41 00 42` contains three bytes. A string operation would treat the zero byte as an ending and lose the third byte. A byte sequence therefore needs its own length. It need not have a terminator at `data[len]`, which might be outside the allocation.
+Why not recover length with `strlen`? An input consisting of bytes `41 00 42` contains three bytes, but `strlen` would report one: the zero byte ends a C string. Using that result as the output length would discard both the zero and the final byte. A byte sequence therefore needs its own length. It need not have a terminator at `data[len]`, which might be outside the allocation.
 
 `sizeof` measures C bytes; `CHAR_BIT` reports their bit width. Our macOS and Linux targets have eight-bit bytes. `sizeof pointer` still measures the pointer object, not an allocation reached through it. Character types can inspect object representations, but raw structures do not become portable file formats: padding, widths, and byte order remain separate encoding decisions.
 
@@ -516,7 +602,9 @@ Unsigned wrapping is defined behavior, but it can still violate our contract. Si
 
 An exact-size growth request on every one-byte append may repeatedly move all previous bytes. Under a model where each growth relocates the buffer, copying costs sum as `1 + 2 + ... + (N - 1)`, which is quadratic. An allocator may sometimes extend in place, but our design cannot depend on that observation.
 
-While capacity grows geometrically, previous capacities form a geometric series. Their sum is bounded by a constant multiple of the final capacity, so relocation copies total linear work in the accumulated input size under this model. The tradeoff is unused capacity. The reference starts at 64 and doubles, except that it checks for overflow before doubling and uses the required size when doubling would overflow. That fallback preserves arithmetic safety but can cause repeated exact-size growth near `SIZE_MAX`; the geometric-series bound does not cover that regime. This explains the policy without claiming a particular allocator's timing.
+Doubling capacity changes that sum. If capacities grow through 64, 128, 256, and 512 bytes, moving the earlier contents copies at most `64 + 128 + 256 = 448` bytes. More generally, the earlier capacities form a geometric series bounded by the final capacity. While doubling continues, relocation therefore adds linear work in the accumulated input size under this model. The tradeoff is unused capacity.
+
+The reference starts at 64 and checks for overflow before each doubling. If doubling would overflow, it requests the exact required size instead. That fallback preserves arithmetic safety but can cause repeated exact-size growth near `SIZE_MAX`; the geometric-series bound does not cover that regime. This argument describes the growth policy, without claiming a particular allocator's timing.
 
 Termination has assumptions too. Each growth-loop iteration increases capacity or selects the final required size. Each input iteration consumes bytes, encounters an end, or reports a read failure. An endless source need not finish; finite available memory may be exhausted first. We have proved local progress, not a deadline or guaranteed success for every source.
 
@@ -632,7 +720,40 @@ int main(int argc, char **argv)
 
 </details>
 
-The reference's `replacement` variable and delayed `len` update implement separate commitments: first secure capacity, then establish the new logical contents. An unsuccessful append preserves the original buffer, given its documented preconditions. Cleanup can therefore release exactly one owned allocation or none, whichever input iteration failed.
+The reference's `replacement` variable and delayed `len` update implement separate commitments: first secure capacity, then establish the new logical contents. An unsuccessful append preserves the original buffer, given its documented preconditions. Cleanup can therefore release exactly one owned allocation or none, whichever input iteration failed. The buffer object itself has automatic storage duration; its `data` member owns a separate allocation. Returning from `main` ends the first lifetime, while `buffer_destroy` explicitly ends the second.
+
+The input loop uses `fread(chunk, 1, sizeof chunk, stdin)`. Its return value counts elements; because each element is one byte, it also counts bytes. A short result means EOF or a read error, so the loop checks `ferror` before accepting collection as complete. It may have obtained a final prefix before detecting an error; the command still discards the entire collection. This differs from the descriptor-level `read` in Chapter 3, where a short successful result need not mean EOF. See the [fread manual](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/fread.3.html).
+
+Successful collection only permits output to begin. A later `fwrite` or flush can fail after exposing some bytes. The command returns 0 after successful collection and output, 1 for a detected data-path failure, and 2 for invalid arguments. Like Chapter 1, it retains the default signal policy, so termination by a signal is a separate outcome.
+
+## Follow one append across the ownership boundary
+
+Take a buffer with 60 stored bytes and capacity 64. A separate input array contains six new bytes. The required length is 66, so the four spare slots are insufficient. The growth policy chooses capacity 128. Here `[a, b)` means offsets from `a` through `b - 1`:
+
+| Point in a successful append | `len` | `cap` | What is established |
+| --- | --- | --- | --- |
+| Entry | 60 | 64 | `[0, 60)` holds the existing input |
+| Required-size check | 60 | 64 | Adding six is representable; no buffer state has changed |
+| Successful reservation | 60 | 128 | The current allocation holds the preserved prefix and sufficient space |
+| Copy six bytes to offset 60 | 60 | 128 | `[60, 66)` now contains the new suffix |
+| Commit the length | 66 | 128 | `[0, 66)` is the accumulated input |
+
+Capacity and length change at different moments because they express different facts. Reserving 128 slots establishes room, not 128 bytes of input. Advancing `len` to 66 before the copy would claim that the suffix is ready before the program has established it.
+
+Now branch at the allocation request. If it fails, `replacement` is null but the owning `data` field still refers to the original allocation. Length remains 60, capacity remains 64, and no suffix was copied. The caller can release that allocation or retry the append. The six source bytes remain the caller's responsibility in either case: append copies them; it never takes ownership of their array.
+
+**Predict:** a caller saved a pointer to offset 57 before the append. What happens to that borrow on allocation failure, on successful growth, and on a three-byte append that fits without growth? How can the caller remember the same position across successful growth?
+
+<details>
+<summary>Review the append trace</summary>
+
+
+Allocation failure preserves the old allocation, so the pointer to offset 57 remains usable within its original bounds. Successful growth through `realloc` ends the old allocation's lifetime; reconstruct the pointer as `b.data + 57` using the current owner. The integer offset survives relocation because it describes a position in the preserved prefix.
+
+A three-byte append reaches length 63 without calling `realloc`; capacity stays 64 and the existing borrow remains valid. This conclusion follows from the reserve function's early return, not from assuming that allocations usually stay at the same address. Destruction ends every remaining borrow.
+
+
+</details>
 
 Now question a piece of work the reference performs: every input byte first enters `chunk`, then gets copied into the retained allocation. Withholding output requires retaining the bytes, but does it require that intermediate copy? A different collector could reserve writable space, read directly into the unused suffix, and advance `len` by the count actually obtained. The required storage remains; one copy of each input byte disappears from this data path.
 
@@ -641,6 +762,7 @@ That alternative has a cost of its own: input handling must now respect the buff
 ## Test the boundaries you derived
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Wpedantic -Werror -g examples/buffer.c -o build/buffer
 printf 'hello\n' | ./build/buffer > build/buffer.out
 cat build/buffer.out
@@ -698,7 +820,7 @@ That single change from Chapter 2 removes the need to remember the entire input.
 
 ## Write down the conditions for the promise
 
-Our program, `copyfd`, uses ordinary blocking byte-stream operations. It assumes usable standard descriptors and exclusive responsibility for their stream positions while copying. An unrelated writer sharing the output can interleave its own bytes; an unrelated reader sharing input can consume bytes we never see. The tool cannot promise an uncontaminated copy while another actor changes the very stream being copied.
+Our program, `copyfd`, uses ordinary blocking byte-stream operations. It assumes usable standard descriptors and exclusive responsibility for consuming input and producing output while copying. An unrelated writer sharing the output can interleave its own bytes; an unrelated reader sharing input can consume bytes we never see. For seekable files, another actor can also change a shared offset. These conditions belong in the contract because the copy loop cannot enforce them on its own.
 
 | Statement | Its role |
 | --- | --- |
@@ -720,23 +842,25 @@ A tempting larger-buffer implementation performs one read, one write of everythi
 
 ## Derive state from conservation of bytes
 
-For one chunk, store `len`, the valid byte count, and `done`, the count already emitted. The pending region is `[done, len)`. Its invariant is `0 <= done <= len <= capacity`, and it must remain unchanged until those pending bytes have been emitted or the operation has failed.
+For one chunk, store `len`, the valid byte count, and `done`, the count already accepted by the output. The pending region is `[done, len)`, with the invariant `0 <= done <= len <= capacity`. That region shrinks as writes succeed. Its bytes must remain available and unchanged until accepted by the output or the copy fails.
 
-Conceptually, during successful copying, total bytes read equal total bytes emitted plus bytes still pending. These totals are useful reasoning variables; the implementation need not store ever-growing counters. The bounded pair `len` and `done` contains enough information for the next action.
+Conceptually, during successful copying, total bytes read equal bytes accepted by the output plus bytes still pending. These totals let us check the accounting; the implementation need not store ever-growing counters. The bounded pair `len` and `done` contains enough information for the next action.
 
-A successful output of `n` bytes changes only `done`, increasing it by `n`. When `done == len`, there are no pending bytes, so the array can safely receive the next input chunk. The program must not read into that array earlier. This is the ownership rule connecting the two loops.
+A write that accepts `n` bytes increases `done` by `n` and leaves `len` unchanged. When `done == len`, there are no pending bytes, so the array can safely receive the next input chunk. The program must not read into that array earlier. This is the ownership rule connecting the two loops.
 
-Separate safety from progress. Bounds ensure that an output request refers to live bytes in the pending region. For progress, use `len - done` as a decreasing measure: each positive write reduces it. An interrupted call with no reported progress leaves it unchanged. A zero result for a nonempty request cannot support either advancement or an endless retry, so the implementation treats it as an error.
+Separate safety from progress. Bounds ensure that an output request refers to live bytes in the pending region. For progress, track `len - done`: each positive write reduces the bytes remaining. An interrupted call with no reported progress leaves that count unchanged. A zero result for a nonempty request supplies no progress, so this implementation treats it as an error instead of advancing the offset or retrying indefinitely.
 
 The proof is conditional. A blocking operation may wait indefinitely, and a repeated interruption need not eventually stop. This program has no overall deadline. “Every positive result decreases remaining work” is a useful statement; “this loop always finishes quickly” would be unsupported.
 
 ## Read the result before classifying the event
 
-A file descriptor is a nonnegative integer naming a process-local reference to an operating-system-managed endpoint. For an ordinary file, the underlying open file description carries state such as the offset. Copying the integer into another variable does not create a new descriptor. The standard descriptor constants are `STDIN_FILENO`, `STDOUT_FILENO`, and `STDERR_FILENO`.
+A file descriptor is a nonnegative integer naming a process-local reference to an operating-system-managed endpoint. The standard descriptors are 0, 1, and 2, named by `STDIN_FILENO`, `STDOUT_FILENO`, and `STDERR_FILENO`. Their numbers describe their conventional roles, not the kinds of objects connected to them: standard input might be a file or a pipe.
+
+For an ordinary file, the descriptor refers to an *open file description*, which carries state such as the current offset. Copying the descriptor integer into another C variable creates a second copy of the number, not a new resource. Closing through either variable makes that number invalid for both unless a later operation reuses it. Chapter 5 examines how distinct descriptors can also share an open file description.
 
 A C `FILE *` also carries library stream state and buffering. Mixing buffered operations and descriptor operations on the same connection requires coordination because a library stream may already hold data the descriptor-level code cannot see. Our data path avoids that additional state.
 
-For a positive-size `read`, a positive result is the count obtained and minus one denotes failure. This copier treats zero as the end of its input, as appropriate for regular files, pipes, and ordinary connected stream sockets. A short success is not itself EOF. These return rules are documented in the [read manual](https://man7.org/linux/man-pages/man2/read.2.html). Store the result in `ssize_t`; converting a negative failure result to `size_t` before testing it destroys the distinction between count and error.
+For a positive-size `read`, a positive result is the count obtained and minus one denotes failure. This copier treats zero as the end of its input, as appropriate for regular files, pipes, and ordinary connected stream sockets. A short success is not itself EOF: a pipe can supply the bytes currently available while its writer remains open. These return rules are documented in the [read manual](https://man7.org/linux/man-pages/man2/read.2.html). Store the result in `ssize_t`; converting a negative failure result to `size_t` before testing it destroys the distinction between count and error.
 
 Do not generalize that zero-result interpretation to every device configuration. A noncanonical terminal with `VMIN = 0` can return zero because no byte arrived before its timer expired, even with `O_NONBLOCK` clear. Such terminal modes need a different input policy and are outside this copier's contract. [Terminal read modes](https://man7.org/linux/man-pages/man3/termios.3.html)
 
@@ -833,26 +957,57 @@ int main(int argc, char **argv)
 
 The small signal setup makes a broken output pipe observable through an error return by ignoring `SIGPIPE`. Otherwise the default signal action normally terminates the writer. That is explicit process policy, explained in Chapter 7, rather than part of the byte-conservation argument.
 
+## Follow the bytes through a short-write trace
+
+Suppose one read has filled the first eight array slots with `ABCDEFGH`. Set `len = 8` and `done = 0`. A scripted output endpoint returns the results below; each positive result accepts that many bytes from the beginning of the requested range.
+
+| Call | Requested bytes | Result | `done` afterward | Output accepted so far | Pending bytes |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `ABCDEFGH`, length 8 | 2 | 2 | `AB` | `CDEFGH` |
+| 2 | `CDEFGH`, length 6 | `-1`, `EINTR` | 2 | `AB` | `CDEFGH` |
+| 3 | `CDEFGH`, length 6 | 3 | 5 | `ABCDE` | `FGH` |
+| 4 | `FGH`, length 3 | 3 | 8 | `ABCDEFGH` | Empty |
+
+After each row, accepted bytes plus pending bytes still account for the original eight. The actual requests are `data + done` and `len - done`: the pointer advances exactly as the count shrinks. Call 2 repeats call 1's *remaining suffix*, because the interruption reported no progress. It does not restart the whole chunk.
+
+Notice what the implementation does not need to do. It does not erase `AB`, shift `CDEFGH` to the beginning, or allocate a new array. The bytes can stay where they are; two integers describe which part still matters. After call 4 the whole array becomes reusable, even though it still physically contains the previous bytes.
+
+**Predict:** replace call 4 with a fatal error that accepts no further bytes. What remains in the output, what does `done` mean, and may the copier claim success because all eight bytes were read? Separately, suppose call 3 returns 3 while `errno` still contains `EINTR` from call 2. Which observation controls the next request?
+
+<details>
+<summary>Review the transfer trace</summary>
+
+
+The failing version has accepted only `ABCDE`; `FGH` remains pending when `write_all` returns failure. Reading a byte and delivering it are separate events, so consuming all input does not establish a complete copy. The command reports failure and cannot retract the accepted prefix. A zero result on call 4 also fails under this implementation's no-progress policy.
+
+The positive count from call 3 controls the transition even if `errno` still says `EINTR`. Advance to offset 5 and request three bytes. Retrying from offset 2 would duplicate `CDE`. Inspecting `errno` only after the documented failure result prevents an old error from undoing new progress.
+
+
+</details>
+
 ## Cleanup has a different contract
 
 Do not generalize an I/O retry rule into “retry every interrupted system call.” A close operation releases a reference whose numeric identifier can be reused. If release already happened, a retry might act on a different resource assigned the same integer.
 
-Interrupted-close behavior differs across standards editions and implementations. Linux releases the descriptor even when reporting `EINTR`, whereas POSIX.1-2024 specifies different behavior. The [close manual](https://man7.org/linux/man-pages/man2/close.2.html) explains this divergence. Our short-lived command attempts each close once, reports failure, and exits; termination releases any remaining descriptors. This is a stated policy for this program, not a portable resource-management recipe for a long-lived library.
+Interrupted-close behavior differs across standards editions and implementations. Linux releases the descriptor even when reporting `EINTR`, whereas POSIX.1-2024 requires the descriptor to remain open on that error. The [close manual](https://man7.org/linux/man-pages/man2/close.2.html) explains this divergence. Our short-lived command attempts each close once, reports failure, and exits; termination releases any remaining descriptors. This is a stated policy for this program, not a portable resource-management recipe for a long-lived library.
 
 The command returns zero only after successful copying and its checked closes; detected operational failures return 1 and arguments are rejected with 2. A failure may leave an output prefix. Status communicates that the copy did not complete; it cannot retract bytes already accepted downstream. Even success does not establish durable storage.
 
 ## Make the tests target the reasoning
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Wpedantic -Werror -g examples/copyfd.c -o build/copyfd
 printf 'one\ntwo\n' > build/copy-input.txt
 ./build/copyfd < build/copy-input.txt > build/copy-output.txt
+printf 'copy status=%s\n' "$?"
 cmp build/copy-input.txt build/copy-output.txt
+printf 'comparison status=%s\n' "$?"
 printf 'A\000B\n' | ./build/copyfd | od -An -tx1
 ./build/copyfd < /dev/null > build/copy-empty.txt
 ```
 
-These cases check whole-output equality, a byte that string operations can mishandle, and EOF without a data chunk. They do not force short writes. Large input alone also does not prove every partial-transfer path executed; a scripted transfer substitute is more decisive for that property.
+These cases check whole-output equality, a byte that string operations can mishandle, and EOF without a data chunk. Capture the copier's status before running `cmp`: matching bytes alone do not show that checked cleanup succeeded. The binary pipeline makes byte values visible, but its shell status ordinarily belongs to the final `od` command. None of these cases forces short writes; a scripted transfer substitute is more decisive for that property.
 
 For a performance experiment, derive a prediction before changing the buffer. In a model where every transfer supplies or accepts the full requested chunk, copying 1 MiB through a 16 KiB array needs 64 data reads, 64 writes, and one read to discover EOF: 129 transfer calls. A one-byte array needs 2,097,153. Short transfers and interruptions increase those counts. This explains one possible source of savings without predicting the same ratio in elapsed time; waiting for an endpoint may dominate either version.
 
@@ -905,7 +1060,9 @@ For the nonblocking transfer, the array, valid length, and consumed offset becom
 
 A pathname looks like the identity of a file because we use names to discuss files. The operating system's model is more subtle. A name is part of a directory structure that can change. An open descriptor refers to an object obtained through an earlier operation. Understanding that distinction explains hard links, symbolic links, renaming, and a large class of race conditions.
 
-Our `fileinfo` tool reports metadata for one pathname. It distinguishes a symbolic link from its target and lists the immediate names inside a directory. It does not create, remove, or rename entries, or write file contents. Observation can still affect metadata: reading a directory can update its access timestamp. [POSIX directory-read semantics](https://man7.org/linux/man-pages/man3/readdir.3p.html)
+Design `fileinfo PATH` to report metadata for one pathname. If the initial lookup identifies a symbolic link, report metadata for both the link and its target. If it identifies a directory, list that directory's immediate entry names. For `fileinfo link`, a symbolic link to a directory receives the two metadata reports but no listing. This policy separates inspecting a link's target from traversing it.
+
+The tool returns 0 after completing the requested inspection, 1 for a detected operational failure, and 2 for invalid arguments. It does not create, remove, or rename entries, or write file contents. Observation can still affect metadata: reading a directory can update its access timestamp. [POSIX directory-read semantics](https://man7.org/linux/man-pages/man3/readdir.3p.html)
 
 ## Separate a name from an object
 
@@ -917,13 +1074,43 @@ The device and inode fields together help identify filesystem objects within the
 
 ## Ask the right metadata question
 
-`stat(path, ...)` normally follows the final symbolic link and reports the target. `lstat(path, ...)` reports the final link itself when that component is a symbolic link. `fstat(fd, ...)` reports the object associated with an open descriptor. The [stat family manual](https://man7.org/linux/man-pages/man2/stat.2.html) documents these distinctions and metadata fields.
+Choose the operation from the object you mean to inspect:
+
+| Question | Operation |
+| --- | --- |
+| What does this pathname resolve to, following its final symbolic link? | `stat(path, ...)` |
+| What does this pathname name, without following a final symbolic link? | `lstat(path, ...)` |
+| What object does this open descriptor refer to? | `fstat(fd, ...)` |
+
+The [stat family manual](https://man7.org/linux/man-pages/man2/stat.2.html) documents these distinctions and metadata fields.
 
 The word “final” matters. `lstat` does not prohibit symbolic links in earlier pathname components. Nor is it a complete defense against concurrent pathname changes. It answers a particular metadata question at a particular operation.
 
 The program initially calls `lstat`. For a symbolic link, it also calls `stat` and labels the two results separately. For a directory, it opens a directory stream and calls `fstat` on that stream's descriptor. That second result describes the directory actually opened, even if the pathname changed after the initial lookup.
 
 Metadata is interpreted according to object type. For a regular file, `st_size` is the logical byte length. A directory's size is not its number of entries. Use `S_ISREG`, `S_ISDIR`, and related predicates to inspect `st_mode`; do not compare the entire mode value to a file-type constant, because the value also includes other bits.
+
+## Directory iteration is a separate protocol
+
+`opendir` creates a directory stream, represented by a `DIR *`. Repeated `readdir` calls yield entries. The returned pointer is borrowed from the stream implementation; consume or copy the name before the next `readdir` on that stream can overwrite it, and before closing the stream. Saving the pointer alone does not save the name. The stream owns the underlying directory descriptor, and `closedir` releases both. Do not separately close the result of `dirfd` while the stream owns it.
+
+The null result from `readdir` has two meanings: end of directory or failure. Set `errno` to zero immediately before the call, then inspect it only if the result is null. That pattern belongs to this interface; it is not a general reason to inspect `errno` after every successful function. The [readdir manual](https://man7.org/linux/man-pages/man3/readdir.3.html) describes the distinction and the returned entry's lifetime.
+
+Directory order is unspecified for our purposes. It may look stable during repeated runs, but the tool makes no sorting promise. The program also does not use `d_type`: applications that need reliable object metadata should obtain it through the appropriate metadata operation instead of assuming every filesystem supplies a useful type in every directory entry.
+
+The listing skips `.` and `..`, and it does not recurse. A recursive walker needs policy for symbolic links, cycles, permission failures, directory replacement, and resource limits. Adding a recursive call without answering those questions is not a complete traversal design.
+
+Names can contain spaces, newlines, and control sequences interpreted by a terminal. The listing therefore quotes each name and escapes bytes outside a small printable set. Non-ASCII names remain represented by their bytes; the program does not decode them as Unicode. This format is for inspection; it is not a shell command to execute.
+
+## Derive it yourself
+
+Before opening the reference, draw the decision tree for a regular file, directory, symbolic link to a file, symbolic link to a directory, and dangling symbolic link. For each case, identify the metadata operations and whether directory iteration runs. Which failure can occur after some normal output has already been printed?
+
+Then trace resource ownership through `opendir`, `fstat`, `readdir`, and `closedir`. Once `opendir` succeeds, every later exit path must attempt to release that stream. A failed metadata lookup does not remove that obligation. Decide whether retaining all entry names serves any requirement of this unsorted, nonrecursive listing.
+
+<details>
+<summary>Reference implementation</summary>
+
 
 ```c
 #include <dirent.h>
@@ -1037,23 +1224,15 @@ int main(int argc, char **argv)
 }
 ```
 
-## Directory iteration is a separate protocol
 
-`opendir` creates a `DIR *` stream. Repeated `readdir` calls yield entries. The returned pointer is borrowed from the stream implementation; consume or copy the name before later operations invalidate or replace it. Finish with `closedir`, which owns the underlying directory descriptor. Do not separately close the result of `dirfd` while the stream owns it.
-
-The null result from `readdir` has two meanings: end of directory or failure. Set `errno` to zero immediately before the call, then inspect it only if the result is null. That pattern belongs to this interface; it is not a general reason to inspect `errno` after every successful function. The [readdir manual](https://man7.org/linux/man-pages/man3/readdir.3.html) describes the distinction and the returned entry's lifetime.
-
-Directory order is unspecified for our purposes. It may look stable during repeated runs, but the tool makes no sorting promise. The program also does not use `d_type`: applications that need reliable object metadata should obtain it through the appropriate metadata operation instead of assuming every filesystem supplies a useful type in every directory entry.
-
-The listing skips `.` and `..`, and it does not recurse. A recursive walker needs policy for symbolic links, cycles, permission failures, directory replacement, and resource limits. Adding a recursive call without answering those questions is not a complete traversal design.
-
-Names can contain spaces, newlines, and bytes your terminal interprets as commands. The listing therefore quotes each name and escapes bytes outside a small printable set. Non-ASCII names remain represented by their bytes, not converted into a claim about Unicode characters. This format is for inspection; it is not a shell command to execute.
+</details>
 
 ## Build an experiment directory
 
 These commands use a freshly generated directory so they do not overwrite existing files:
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Wpedantic -Werror -g examples/fileinfo.c -o build/fileinfo
 lab_dir=$(mktemp -d)
 printf 'abc' > "$lab_dir/original"
@@ -1091,6 +1270,44 @@ Consider a proposed fix: “Check the pathname twice before opening it.” Deriv
 
 For the narrower requirement “report metadata for the object I opened,” derive the operations from that sentence: open, then inspect the descriptor. A separate preliminary pathname check adds no guarantee of that identity. Test the distinction with a controlled pause between lookup and open, replacing the name during the pause. One forced counterexample disproves the repeated-check argument more directly than thousands of runs in which the timing happens to cooperate.
 
+## Keep an object open while its name changes
+
+Make the distinction observable without relying on a race. In a separate scratch directory, create two regular files with different contents. The parenthesized commands run in a subshell, so their saved descriptor is local to this experiment:
+
+```sh
+rename_dir=$(mktemp -d)
+printf 'old\n' > "$rename_dir/current"
+printf 'new\n' > "$rename_dir/replacement"
+(
+    exec 3< "$rename_dir/current"
+    mv "$rename_dir/replacement" "$rename_dir/current"
+    printf 'saved descriptor: '
+    cat <&3
+    printf 'new pathname: '
+    cat "$rename_dir/current"
+    exec 3<&-
+)
+```
+
+Here `exec` has no program argument: it establishes descriptor 3 in the subshell. `cat <&3` reads through that saved connection; `cat "$rename_dir/current"` opens the pathname again. Both files are in the same directory, so the replacement is a rename within one filesystem. Assume no other process changes these files and each operation succeeds.
+
+Call the original object A and the replacement B. Opening `current` first obtains a reference to A. Renaming then makes `current` name B and removes A's directory entry. The existing descriptor still refers to A; it is not a promise to repeat the lookup of `current` before each read. POSIX keeps an unlinked object's contents available while open references remain. [Rename semantics](https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html)
+
+The two lines therefore report `old` and `new`. A later `fileinfo "$rename_dir/current"` inspects B. An `fstat` on saved descriptor 3 would inspect A. This is the same distinction behind the example's separate `name` and `opened-directory` metadata reports.
+
+**Predict:** insert a second `cat <&3` immediately after the first. Does it read `old` again, read `new`, or print no bytes? Explain both which object it reaches and where reading begins.
+
+<details>
+<summary>Review the saved descriptor</summary>
+
+
+The second read prints no bytes. The first `cat` has advanced the shared open file description's offset to EOF in A. Reusing the descriptor preserves both its object reference and that offset; it does not reopen A at the beginning. A fresh open of `current` reaches B at its own initial offset.
+
+Closing descriptor 3 releases the remaining saved reference. The rename changed a directory entry, while reads changed an offset. Keeping these transitions separate explains the result without assuming that a pathname permanently identifies an object.
+
+
+</details>
+
 ## Exercises
 
 1. Append one byte through `alias` in the experiment directory. Inspect `original` and `shortcut` again. Predict which metadata sizes and contents change before running the commands.
@@ -1101,16 +1318,27 @@ For the narrower requirement “report metadata for the object I opened,” deri
 
 ## Selected answers
 
+<details>
+<summary>Review after your attempt</summary>
+
+
+Every valid invocation begins with `lstat`. A regular file needs no further metadata lookup. A symbolic link adds `stat`, even when its target is a directory; a missing target causes failure after the link's own metadata has been printed. A directly named directory adds `opendir`, `fstat` on the opened descriptor, iteration, and `closedir`. The streaming listing needs only the current borrowed entry; sorting would introduce a reason to retain names.
+
 In exercise 1, `printf 'd' >> "$lab_dir/alias"` changes the shared regular file to four bytes. Both hard-link names and the symbolic link's target observe those contents. The symbolic link object's own stored target remains `original`; its own size does not become four.
 
 For exercise 2, mask ordinary permission bits with `0777` if those nine bits are what your output promises. Special permission bits require an explicit additional policy. For exercise 3, `fstatat(dirfd(dir), entry->d_name, &st, AT_SYMLINK_NOFOLLOW)` inspects the final entry without following its final symbolic link. Include `<fcntl.h>` for the flag. Check failure normally: an entry returned earlier is not a promise that its name still exists, and concurrent replacement can change which object it resolves to.
+
+
+</details>
 
 
 # Chapter 5 — Starting a program and collecting its result
 
 Imagine a build helper that runs a compiler and then reports whether compilation succeeded. It receives a command and separate arguments, including filenames containing spaces. The helper must survive the compiler's execution, preserve the arguments, and distinguish an ordinary nonzero exit from termination by a signal. Its first version runs one command at a time.
 
-Before choosing functions, identify the required separation. The requested program needs an execution context. The helper needs its own continuing context to observe the result. Replacing the helper's program would satisfy “run the compiler” but lose the observer. Our requirements therefore call for another process, or a service that provides equivalent supervision. They do not imply that every operating system must expose the same process-creation API.
+Before choosing functions, identify the two roles. The compiler must run, and the helper must remain available to observe its result. Replacing the helper with the compiler would lose that observer. Our requirements therefore call for another process, or a service that provides equivalent supervision.
+
+A **process** is a running instance with its own identity and resources. A **program image** is the code and data it is currently executing. Creating a process and replacing its program image are separate operations: `fork()` does the first; the `exec` family does the second. This distinction lets the helper remain one process while its child becomes the compiler.
 
 ## Define what the result means
 
@@ -1123,13 +1351,13 @@ output:  the child's inherited standard output and standard error
 result:  the child's completion, translated into the runner's exit status
 ```
 
-There are already two decisions to make. Does a command name search `PATH`, or must the caller supply a path? Does execution failure have a separate reporting channel, or share the small exit-status space with ordinary program results? Our first version searches `PATH` and uses conventional status values. Those choices make the tool convenient, while leaving some outcomes ambiguous.
+There are already two decisions to make. Does a command name search `PATH`, or must the caller supply a path? How do we report failure to start the requested program, as distinct from a program that starts and then reports failure? We could use a separate reporting channel, or share the small exit-status space with ordinary program results. Our first version searches `PATH` and uses conventional status values. Those choices make the tool convenient, while leaving some outcomes ambiguous.
 
 Predict the result of running a nonexistent command, then running an existing program that deliberately exits with `127`. If both use the same status, what extra evidence could distinguish them? Keep that question open while deriving the lifecycle.
 
-Before accepting “a launcher needs a child” as a rule, change one requirement. Suppose this helper only prepares arguments and hands control to a compiler; it has no later report, cleanup, or supervision to perform. What now requires the helper to survive? Nothing in that revised contract. Successful execution can replace it directly, removing a process and the helper's collection path. Execution failure still needs a defined result because replacement did not occur.
+Before accepting “a launcher needs a child” as a rule, change one requirement. Suppose this helper only prepares arguments and hands control to a compiler; it has no later report, cleanup, or supervision to perform. The helper no longer needs to survive. Successful program replacement removes the need to create a child or collect its result. A failed replacement still needs a defined error path because the helper remains in control.
 
-This is a useful first-principles question: **which requirement pays for each role?** In our original problem, observing and translating completion pays for the continuing parent. “Launchers usually fork” does not. Before optimizing creation or waiting, check whether the observer is required at all. If it is, retain it; if the contract changes, rederive the design. Removing necessary supervision would be a bug, while preserving unnecessary supervision would be an unexamined cost.
+Ask **which requirement makes each role necessary**. Here, observing and translating completion requires the continuing parent. If that requirement disappears, direct program replacement becomes sufficient. The process structure follows from the work the helper still owes its caller.
 
 ## Derive the minimum state
 
@@ -1150,7 +1378,7 @@ completion collected; parent can report it
 
 Termination and collection are separate events. A child can finish before its parent begins waiting. The operating system retains completion information so that scheduling order does not erase the result. Under ordinary child-status handling, an exited, uncollected child is called a zombie; it is no longer executing, but its bookkeeping remains. [Waiting for children](https://man7.org/linux/man-pages/man2/waitpid.2.html)
 
-Our ownership invariant is: **every successfully created child has one designated collector**. Creation failure produces no such obligation. Waiting for a different child violates the assignment even if that other child also belongs to the process. A helper embedded in a larger application must coordinate collection and the application's `SIGCHLD` policy.
+Our ownership invariant is: **every successfully created child has one designated collector**. Creation failure produces no such obligation. The collector uses the child's process ID (PID) to wait for that child. A wait that accepts any child could collect a result another component expects, so a helper embedded in a larger application must coordinate collection and the application's `SIGCHLD` policy.
 
 The progress claim is conditional: if the child eventually terminates, the parent gets execution time, and collection succeeds, the helper can finish. No waiting API can make an arbitrary child complete useful work. A timeout would be a new policy, requiring decisions about cancellation, descendants, and partial results.
 
@@ -1182,11 +1410,49 @@ The spawn interface is a serious implementation option, especially when its supp
 
 `fork()` returns the child's positive PID in the parent, zero in the child, and `-1` on failure. Both successful branches continue after the call. Ordinary private variables initially have equal values, but later modifications are independent. Inherited descriptors instead refer to the same underlying open file descriptions, so an inherited regular-file offset can be shared. Copying a handle and copying its resource are different operations. [POSIX `fork` specification](https://man7.org/linux/man-pages/man3/fork.3p.html)
 
+### Follow one variable and one file offset
+
+Suppose the helper has an ordinary local `int value = 7` and one descriptor for a stable file containing `ABCDE`. It opened that file once, and the current offset is zero. The parent forks, then waits while the child changes `value` to `99`, reads exactly two bytes using `read()`, closes its descriptor, and exits. Assume these operations succeed; there are no buffered C streams or other users of this file description.
+
+| Event | Parent's `value` | Child's `value` | Shared file offset |
+| --- | --- | --- | --- |
+| Immediately after the fork | `7` | `7` | `0` |
+| Child assigns `99` | `7` | `99` | `0` |
+| Child reads `AB` | `7` | `99` | `2` |
+| Child closes and exits; parent collects it | `7` | No longer alive | `2` |
+| Parent reads one byte, obtaining `C` | `7` | No longer alive | `3` |
+
+Waiting establishes the order of this experiment; it does not copy the child's variables back into the parent. The offset changes because both descriptors refer to one open file description. The child's `close()` removes its reference, while the parent's reference keeps the description usable. The descriptor number is just an integer in each process; its referent has a different sharing rule from an ordinary local variable.
+
+**Predict:** the child now calls `lseek(fd, 0, SEEK_SET)` after reading `AB`, then closes and exits. Which byte does the parent read after collecting it? Would assigning zero to a separate local variable named `position` have the same effect?
+
+<details>
+<summary>Review the offset trace</summary>
+
+
+The parent's read obtains `A`: the successful seek changes the shared open file description's offset back to zero. Assigning to `position` changes only the child's private variable and leaves the offset at two. To obtain independent sequential offsets, the processes need separate open file descriptions; `dup()` alone would not provide them. Alternatively, a positioned read can request an explicit offset without advancing the shared one. [POSIX positioned reads](https://pubs.opengroup.org/onlinepubs/9799919799/functions/read.html)
+
+
+</details>
+
+### Replace the child's program image
+
 The child calls `execvp()`. The `v` interface accepts a null-terminated argument vector; the `p` variant searches `PATH` for a command without a slash. Success replaces the program image and never returns to this code. The PID remains the child's identity. Our existing `argv` already supplies a terminating null pointer, so `&argv[1]` preserves the command's argument boundaries. [The `exec` family](https://www.man7.org/linux/man-pages/man3/execlp.3.html)
 
 The invoking shell has already handled quoting. In `build/run printf '%s\n' 'two words'`, the final argument is one string. Concatenating the vector into a command string would create a new parsing problem. `execvp()` also has a historical shell fallback for certain executable text files; the example should not be treated as a hardened launcher for untrusted executable paths.
 
-Now attack a tempting implementation: “Call execution in the child, then let the function finish normally.” Execution returns only on failure, making that fall-through precisely the exceptional case:
+For that invocation, the executed program receives the vector below. Quotes are shell syntax and are already gone; the backslash and `n` remain two characters in the format string for `printf` to interpret.
+
+```text
+argv[0] -> "printf"
+argv[1] -> "%s\n"
+argv[2] -> "two words"
+argv[3] -> NULL
+```
+
+Here the double quotes delimit the strings in the drawing; they are not argument bytes.
+
+Now attack a tempting implementation: “Call `execvp()` in the child, then let the function finish normally.” `execvp()` returns only on failure, making that fall-through precisely the exceptional case:
 
 ```text
 child attempts execution
@@ -1202,7 +1468,7 @@ This violates the result contract without crashing. The child must turn executio
 
 Sketch three creation outcomes and two child execution outcomes. For each arrow, identify who continues and who still owes collection. Then choose what happens if a wait is interrupted: does the child's existence change merely because the parent's wait returned early?
 
-The reference implementation flushes parent streams before creation, saves execution's `errno` immediately, and uses a fixed child diagnostic through `write()`. That helper handles partial and interrupted writes; an unsuccessful diagnostic attempt does not justify reporting successful execution.
+The reference implementation flushes parent streams before creation, saves `errno` immediately if `execvp()` fails, and writes a fixed diagnostic from the child. Its `write()` helper handles partial and interrupted writes. Even if that diagnostic cannot be delivered, the child must still report failure through its exit status.
 
 <details>
 <summary>Reference implementation</summary>
@@ -1282,7 +1548,15 @@ int main(int argc, char **argv)
 
 </details>
 
-The parent retries `waitpid(child, &status, 0)` after `EINTR`. It then asks which kind of result it received before extracting any field. `WEXITSTATUS` is meaningful after `WIFEXITED`; `WTERMSIG` is used after `WIFSIGNALED`. The integer returned through `status` is not itself the child's ordinary exit code. [Wait-status interpretation](https://man7.org/linux/man-pages/man2/waitpid.2.html)
+The parent retries `waitpid(child, &status, 0)` after `EINTR`. Interruption ends that wait attempt; it does not collect the child or cancel the obligation. Keep three values distinct:
+
+| Value | Meaning |
+| --- | --- |
+| Successful return from `waitpid` | The PID of the child whose result was collected. |
+| `status`, written through the second argument | An encoded description of how the child changed state. |
+| `WEXITSTATUS(status)` | The child's exit value, valid only when `WIFEXITED(status)` is true. |
+
+For signal termination, first check `WIFSIGNALED(status)`, then use `WTERMSIG(status)`. With the options used here, ordinary child handling returns a termination result; this runner does not request reports of job-control stops. Only the low eight bits of a normal exit value are available through `WEXITSTATUS`, so the status channel cannot carry an arbitrary C integer. [POSIX wait-status interpretation](https://pubs.opengroup.org/onlinepubs/9699919799/functions/wait.html)
 
 The runner distinguishes these cases internally, but translating a signal to `128 + signal number` loses that distinction in its own exit status: a child can exit normally with the same numeric value. The signal diagnostic supplies additional evidence for a person. A caller needing an unambiguous machine-readable termination kind needs a separate structured result, rather than interpreting the runner's exit value alone.
 
@@ -1347,7 +1621,7 @@ Before running it, predict three things: how many bytes enter the consumer, what
 
 A temporary file is a viable intermediate representation. Run the producer, check its result, then give the completed file to the consumer. The file can be inspected or replayed, and the commands need not run together. This costs storage proportional to the intermediate output and delays consumption until the selected completion boundary. Creation, permissions, removal, and storage exhaustion become part of the design.
 
-A pipe instead permits both programs to run concurrently with a bounded kernel buffer. A slow consumer constrains its producer through backpressure. The intermediate bytes are not retained for replay. A hang can arise from relationships among processes and open references, even when every individual call behaves correctly.
+A pipe permits both programs to run concurrently with a bounded kernel buffer. With the blocking descriptors used here, a full buffer makes the producer wait until the consumer frees space. This is **backpressure**: the slower consumer limits how quickly the producer can send. The intermediate bytes are not retained for replay.
 
 | Requirement | Temporary file | Direct pipe |
 | --- | --- | --- |
@@ -1360,9 +1634,17 @@ We choose the pipe because early consumption and bounded buffering matter for th
 
 ## Derive the state that matters
 
-For reasoning, model the channel with three quantities: buffered bytes `B`, open write references `W`, and open read references `R`. The kernel maintains the actual channel state; our program need not duplicate these counters. The parent needs only its owned endpoints, the child PIDs it must collect, and their results.
+For reasoning, model the channel with three quantities: buffered bytes `B`, open write references `W`, and open read references `R`. A reference is an open descriptor that keeps an endpoint alive; one process can hold several. Duplicating a descriptor or inheriting it across a fork adds a reference. Closing one removes only that reference. The kernel maintains the actual channel state; our program need not duplicate these counters.
 
-For a positive-length blocking read, the important cases are: available bytes can be consumed; an empty pipe with possible writers requires waiting; an empty pipe with no writers produces EOF. Thus “the producer finished” is insufficient. A different process may still hold a write reference. [POSIX read rules for pipes](https://man7.org/linux/man-pages/man3/read.3p.html)
+For a positive-length blocking read, the normal outcomes follow from this state:
+
+| Buffered bytes | Open write references | Reader's outcome |
+| --- | --- | --- |
+| `B > 0` | Any | Consume available bytes; a short read is possible. |
+| `B == 0` | `W > 0` | Wait for data or for all writers to close. |
+| `B == 0` | `W == 0` | Return zero: EOF. |
+
+EOF is a return condition, not a special byte sent by the writer. “The producer finished” is insufficient: another process may still hold a write reference, or buffered bytes may remain unread. Errors and signal interruption still require their usual handling. [POSIX read rules for pipes](https://pubs.opengroup.org/onlinepubs/9799919799/functions/read.html)
 
 The intended final topology is:
 
@@ -1374,11 +1656,9 @@ producer:        owns its output reference; no unused channel references
 consumer:        owns its input reference; no unused channel references
 ```
 
-This gives two invariants. Bytes enter through the intended producer output and leave through the intended consumer input. Every additional reference has a defined removal point before the parent waits for completion. The first concerns correct data flow; the second is also essential for progress.
+This gives two obligations. Bytes must flow through the intended producer output and consumer input. Each process must also close the channel references it does not need: children do so during setup, and the parent closes its own references before waiting. The parent may begin waiting before a child finishes its setup; correctness does not depend on which runs first. The first obligation concerns data flow; the second is essential for progress.
 
-Consider a proposed version with two pipes: the parent reads the producer's bytes into a buffer and writes them to the consumer. Before asking how large that buffer should be, ask what required result the relay creates. If the parent neither transforms nor inspects the bytes, the direct connection already satisfies our contract. Deleting the relay removes its buffer, its partially forwarded range, and its transfer-failure paths. We can eliminate work before trying to make that work faster.
-
-Now add a genuine requirement: the parent must retain a copy of every intermediate byte for later inspection. The direct connection no longer suffices by itself. Forwarding with storage, or another duplication design, may earn its added state. Ask what “later inspection” means before implementing it: inspecting child statuses requires supervision, but inspecting their bytes requires a data-path change. Similar wording can hide very different obligations.
+The parent needs only its owned endpoints, child PIDs, and collected results. Relaying the bytes through a second pipe would add a buffer, partial-transfer state, and failure paths without satisfying any additional requirement. If the parent later needs to inspect or retain the bytes, that requirement would justify a different data path. Inspecting child statuses alone does not.
 
 The external interface supplies ordering and EOF rules. Our model assumes ordinary blocking descriptors, commands that use their streams as intended, and no requirement to retain the intermediate output. Choosing two commands, a `--` separator, and a particular result policy are application decisions. Actual scheduling and pipe capacity are observations, not assumptions the algorithm should depend on.
 
@@ -1404,6 +1684,8 @@ parent waits for consumer: plans to close its reference afterward
 
 No byte is corrupted, and no invalid pointer is involved. This is a liveness failure caused by an ownership decision. Closing the parent's reference before waiting removes the cycle. Sleeping, changing priority, or closing only the producer's descriptor cannot repair the missing ownership transition.
 
+The same reasoning reaches beyond these three processes. If the producer starts a descendant that inherits its standard output, that descendant holds a write reference too. The consumer may wait for EOF after the original producer has exited. When diagnosing the hang, look for every holder of the endpoint, including descendants. [Descriptor inheritance across execution](https://pubs.opengroup.org/onlinepubs/9799919799/functions/exec.html)
+
 ## Map the topology onto descriptors
 
 `pipe(ends)` creates the channel and returns its read descriptor in `ends[0]` and write descriptor in `ends[1]`. Forking copies references into each child. A possible scheduling point after both forks, before child cleanup, has both original endpoints in all three processes. Other schedules perform some cleanup earlier; correctness must survive either order. [POSIX pipe creation](https://man7.org/linux/man-pages/man3/pipe.3p.html)
@@ -1413,6 +1695,32 @@ The producer needs its standard output to refer to the write end. `dup2(ends[1],
 `dup2()` replaces the target descriptor as one operation. Separately closing a target and calling `dup()` opens a gap in which another allocation could take the desired number. When its source and target differ, successful `dup2()` clears the target's close-on-exec flag, so the redirected standard stream survives execution. [POSIX `dup2` specification](https://man7.org/linux/man-pages/man3/dup2.3p.html)
 
 The example checks that descriptors 0, 1, and 2 are initially open. Its new pipe endpoints are consequently above 2, so closing the originals cannot close the newly redirected standard stream. This is a checked precondition, not a universal fact about pipe descriptor numbers. A more general launcher can move temporary descriptors above the standard range and handle closed standard streams deliberately.
+
+### Account for every reference through redirection
+
+For one concrete run, suppose the pipe receives descriptors 3 and 4. At the instant just after both forks, let all three processes still hold both originals. Descriptor 3 names the read end and 4 the write end. The inherited standard streams name other resources. Track only references to this new pipe:
+
+| Setup completed so far | Parent's pipe descriptors | Producer's pipe descriptors | Consumer's pipe descriptors |
+| --- | --- | --- | --- |
+| Both forks | `3:R, 4:W` | `3:R, 4:W` | `3:R, 4:W` |
+| Producer redirects and closes originals | `3:R, 4:W` | `1:W` | `3:R, 4:W` |
+| Consumer redirects and closes originals | `3:R, 4:W` | `1:W` | `0:R` |
+| Parent closes originals | None | `1:W` | `0:R` |
+
+In the producer, `dup2(4, 1)` first replaces that process's old standard-output reference. It leaves descriptor 4 open and adds descriptor 1 as another reference to the write end. Closing 3 and 4 then leaves 1 usable. The consumer performs the corresponding transition with `dup2(3, 0)`. Neither operation changes the parent's descriptors: the descriptor tables belong to different processes even though some entries refer to shared resources.
+
+The final row has `R == 1` and `W == 1`. After the producer closes standard output or exits, `W` reaches zero. The consumer can still read buffered bytes; its next positive-length read after draining them returns EOF. No process sends an EOF byte.
+
+**Predict:** the parent accidentally closes descriptor 1 instead of descriptor 4, then waits. Both children complete their correct setup. Can the consumer finish after the producer exits? What if the producer closes 4 before attempting its `dup2(4, 1)`?
+
+<details>
+<summary>Review the descriptor trace</summary>
+
+
+The parent retains its pipe write reference at 4. Closing its own standard output does not remove that reference, so the consumer can drain the pipe and then wait forever for EOF. In the second variation, `dup2()` fails because its source descriptor has already been closed, assuming nothing has reused that number. Redirection must acquire the surviving reference before cleanup releases the original. [POSIX descriptor duplication](https://pubs.opengroup.org/onlinepubs/9799919799/functions/dup.html)
+
+
+</details>
 
 Before revealing the source, draw a row for the parent and each child. Mark the reference created by each duplication, then cross out every original endpoint. Finally, put each wait after the parent's last required close. Your drawing should explain the implementation's order without depending on the numbers 3 and 4.
 
@@ -1599,9 +1907,9 @@ The cancellation policy uses `SIGKILL` for an incomplete setup. That is an expli
 
 A byte stream does not carry the producer's process status. A consumer can successfully count an empty stream produced by a failing program. Returning only the right command's status is one useful policy for shell composition; checking both statuses is another. Our tool returns a nonzero right status if present, otherwise the left status, making producer failure visible.
 
-There is a further consequence: a consumer may intentionally stop early. Once all read references are closed, a later write raises `SIGPIPE`; when that signal is ignored, the write reports `EPIPE`. Our tool can therefore report a nonzero producer result for an intentional early-consumer exit. A specialized pipeline might classify that outcome differently. [POSIX write errors](https://man7.org/linux/man-pages/man3/write.3p.html)
+There is a further consequence: a consumer may intentionally stop early. This is where `R` matters. Once `R == 0`, a later write generates `SIGPIPE`; its default action terminates the writer. If the signal is ignored, the write instead reports failure with `EPIPE`. Our tool can therefore report a nonzero producer result for an intentional early-consumer exit. A specialized pipeline might classify that outcome differently. [POSIX write errors](https://man7.org/linux/man-pages/man3/write.3p.html)
 
-Also distinguish a byte stream from messages. Two writes do not require two corresponding reads. Atomic insertion relative to competing writers does not establish read boundaries. A record-oriented protocol would need lengths, delimiters, or another framing rule. Counting bytes needs no such rule, which is one reason it makes a useful first consumer.
+Also distinguish a byte stream from messages. If a producer writes `ab` and then `cd`, the consumer must accept `abcd` in one read or the same bytes split across smaller reads. The write boundaries are not part of the stream. Atomic insertion relative to competing writers does not establish read boundaries either. A record-oriented protocol needs lengths, delimiters, or another framing rule. Counting bytes needs no such rule, which is one reason it makes a useful first consumer.
 
 ## Challenge the implementation with inputs
 
@@ -1646,7 +1954,7 @@ The parent waits for the left child first only after both children are running a
 
 Imagine a small service that owns an output file. A controller must be able to ask it to stop, let it finish its cleanup, and collect its result. The request may arrive while the service is between ordinary instructions. We want a protocol that preserves the request until the service can act on it, without forcing cleanup to run inside an arbitrary interrupted operation.
 
-For the first experiment, remove useful work and the output file. Keep only startup, a stop request, and normal termination. Simplifying the payload lets us investigate the synchronization problem directly. The eventual service can add resources after this ordering is understood.
+For the first experiment, leave out the service's work and output file. Keep only startup, a stop request, and normal termination. This isolates the synchronization problem. We can add resources after understanding when the request becomes safe to send and how the receiver remembers it.
 
 The requirement is an orderly response to a supported request after announced readiness. It is not a promise to recover from every possible process termination. Establishing that boundary is part of the design, before choosing a signal number or handler.
 
@@ -1660,7 +1968,7 @@ initializing --> ready --> stop accepted --> cleaning up --> finished
           controller may send now
 ```
 
-The controller needs evidence that the receiver has installed its policy. The receiver needs the request to remain observable if it arrives just before waiting. Because stopping is an idempotent decision, a boolean “stop requested” is enough information; ten stop requests need not produce ten separate cleanups.
+The controller needs evidence that the receiver is prepared to handle the request. The receiver must remember a request that arrives just before it starts waiting. Stopping is **idempotent**: repeating the request has the same intended effect as making it once. A boolean “stop requested” therefore carries enough information; ten requests need not produce ten separate cleanups.
 
 This gives a safety property: cleanup executes once through ordinary controlled flow, with resources still valid. It also gives a conditional progress property: after a supported request and readiness, the receiver eventually reaches cleanup if it gets execution time and its remaining operations complete. Whether cleanup itself can block indefinitely is a separate design question.
 
@@ -1668,9 +1976,17 @@ Predict the dangerous intervals. What happens if the controller sends before rea
 
 ## Distinguish the operating-system rules
 
-POSIX signals provide notifications with several separate controls. A signal's **disposition** specifies its delivery action: default behavior, ignoring, or a handler. A thread's **mask** specifies blocked signals. A generated blocked signal can remain **pending** until it is accepted or unblocked. Blocking therefore preserves a different policy from ignoring. [Signal concepts](https://man7.org/linux/man-pages/man7/signal.7.html)
+POSIX signals provide notifications with three separate controls:
 
-These are supplied interface rules. We cannot derive their exact shape from processor hardware, and we should not substitute an intuitive meaning for a specified one. In particular, ordinary signals can coalesce: several occurrences of one signal need not become several independently countable events. That fits our idempotent stop request but would fail a requirement to count every submitted job.
+| Concept | Question it answers |
+| --- | --- |
+| **Disposition** | What happens on delivery: the default action, ignoring, or a handler? |
+| **Mask** | Which signals does this thread block from ordinary delivery? |
+| **Pending state** | Which generated signals are still waiting to be delivered or accepted? |
+
+For a blocked signal whose disposition is not ignore, pending state remembers the notification. Ignoring a signal does not provide that guarantee. These controls explain how we can defer a stop request without discarding it. [POSIX signal generation and delivery](https://pubs.opengroup.org/onlinepubs/9799919799/functions/V2_chap02.html)
+
+Ordinary signals can **coalesce**: several occurrences of one signal need not become several separately countable events. That fits our idempotent stop request but would fail a requirement to count every submitted job. A signal number identifies a notification type; it does not identify one unique request.
 
 Our chosen notifications are `SIGINT` and `SIGTERM`. Their symbolic names express the source-level interface; raw numeric values should not become a portable protocol. `SIGKILL` and `SIGSTOP` cannot be caught, blocked, or ignored. Consequently, the service's cleanup guarantee must be conditional on the supported termination path. [Signal dispositions and restrictions](https://man7.org/linux/man-pages/man7/signal.7.html)
 
@@ -1687,13 +2003,13 @@ The observed delay cannot establish a deadline guarantee. If shutdown must finis
 
 Work backward from a proposed requirement: “exit within five seconds, after uploading final metrics and saving all pending work.” Suppose the upload must await a remote reply, with no bound on when that reply arrives. Those requirements cannot jointly supply the deadline. Faster signal handling cannot bound an unbounded dependency after acceptance.
 
-First ask which results are essential. If the metrics upload is optional, remove it from the required shutdown path or give it an explicit abandonment policy. If saving pending work is mandatory, its duration still needs a bound or the deadline needs revision; a timeout cannot manufacture saved data. Only then choose a waiting mechanism. To investigate an uncertain dependency, make the metrics receiver withhold its reply and observe which shutdown state stalls. That experiment can disprove a claimed deadline for that path. One prompt reply cannot prove the deadline for all runs.
+If the metrics upload is optional, specify when it may be abandoned. If saving pending work is mandatory, its duration needs a bound or the deadline needs revision. Test the dependency by making the metrics receiver withhold its reply: that can expose an unbounded cleanup path, even when signal acceptance works correctly.
 
 ## Compare two viable ways to receive the event
 
 One design installs a minimal handler that records a flag. Ordinary code inspects the flag and performs cleanup. Waiting must coordinate the flag check with signal delivery; otherwise it can miss the transition that should wake it.
 
-A second design blocks the selected signals and accepts one synchronously with `sigwait()`. After the function returns, normal code can process the result. For this program, whose only job is to await shutdown, that design needs no user-maintained request flag: the operating system's pending state and the program's control flow provide the necessary state.
+A second design blocks the selected signals and accepts one synchronously with `sigwait()`. “Synchronously” means the program receives the signal as the result of a call at a chosen point in its control flow; no handler runs for that acceptance. For this program, whose only job is to await shutdown, the operating system's pending state replaces a user-maintained request flag.
 
 | Design | Main benefit | Obligation it introduces |
 | --- | --- | --- |
@@ -1731,9 +2047,36 @@ Our receiver first blocks `SIGINT` and `SIGTERM`, establishes dispositions, and 
 | While waiting | Acceptance lets the call return with the selected signal. |
 | During cleanup | Selected signals remain blocked; this one-shot design does not start cleanup again. |
 
-The key invariant is that the selected signals remain blocked throughout the announced interval. Readiness is therefore evidence of a completed state transition, not a statement about elapsed startup time. A sleep in the controller could only estimate that transition.
+The key invariant is that the selected signals remain blocked throughout the announced interval. `sigwait()` accepts a selected pending signal while it is blocked; there is no need to unblock it first. Readiness reports that the receiver has established this policy. A sleep in the controller could only estimate when that happened.
 
 `sigwait()` returns zero on success and places the signal number in its output parameter. Its error result is an error number directly, rather than a `-1` result whose explanation must be read from `errno`. Handling it like `read()` would mix two contracts. [POSIX `sigwait` specification](https://man7.org/linux/man-pages/man3/sigwait.3p.html)
+
+### Let the request arrive at the awkward moment
+
+Assume one `SIGTERM` request and successful setup. Deliberately delay the receiver after its controller has read the readiness line but before the receiver calls `sigwait()`. The delay need not have any particular duration; the following order is enough:
+
+| Step | Receiver or controller action | Receiver's signal state |
+| --- | --- | --- |
+| 1 | Receiver blocks the selected set and establishes default dispositions. | `SIGTERM` blocked; none pending. |
+| 2 | Receiver flushes readiness; controller reads it. | Policy established; receiver need not be waiting yet. |
+| 3 | Controller sends `SIGTERM`. | `SIGTERM` blocked and pending. |
+| 4 | Receiver eventually calls `sigwait()`. | The call accepts the pending signal. |
+| 5 | Receiver enters cleanup after a successful return. | `SIGTERM` still blocked; the accepted occurrence is no longer pending. |
+
+The controller does not need evidence that step 4 has begun. Evidence of step 2 is enough because pending state bridges the interval. Compare the broken flag-and-`pause()` loop: there, delivery consumes the event before the wait begins, and `pause()` has no reason to inspect the flag. Here, acceptance and observation of the request are one interface operation.
+
+Blocking also protects the cleanup path from a second supported request. If another `SIGTERM` arrives during cleanup, it can become pending again, but it does not start another cleanup or take its default action while blocked. This program keeps the mask in place through normal termination. In a reusable component, restoring a caller's mask would require a separate policy for pending requests.
+
+**Predict:** just before step 4, the receiver decides to “let the signal through” by unblocking `SIGTERM`. What happens to the pending request under its default disposition? Does `sigwait()` require that unblocking step?
+
+<details>
+<summary>Review the arrival trace</summary>
+
+
+Unblocking allows ordinary delivery of the pending `SIGTERM`, whose default action terminates the process. The receiver can lose its intended cleanup path before reaching the wait. `sigwait()` instead requires the selected signals to be blocked and accepts one directly. Blocking is what makes the waiting protocol work; it is not an obstacle to remove before acceptance.
+
+
+</details>
 
 Before opening the reference implementation, write the three operations “block, announce, accept” and justify each ordering edge. Include the flush in your explanation: output buffered only in the receiver's memory cannot yet serve as evidence for another process.
 
@@ -1799,7 +2142,7 @@ int main(void)
 
 The program restores default dispositions while the signals are blocked. A background shell command can inherit an ignored `SIGINT`; resetting that disposition avoids depending on inherited ignore behavior. This does not deliver a blocked signal immediately. Disposition and mask are separate controls. [POSIX signal actions](https://man7.org/linux/man-pages/man3/sigaction.3p.html)
 
-After acceptance, `printf()` is ordinary program work, not a handler call. The example has no application resource to release, so its cleanup consists of finishing the normal path and stream handling. A real service would fill this position with an explicit resource order: stop accepting work, settle owned work, then release resources still needed by that work. Reporting “cleanup complete” would not itself prove the process has exited; a supervising parent still collects completion.
+After `sigwait()` returns, `printf()` runs in ordinary control flow, where the handler restrictions do not apply. The example has no application resource to release, so its cleanup consists of finishing the normal path and checking its output stream. A real service needs an explicit order: stop accepting new work, finish or abandon existing work according to its contract, then release the resources that work used. Reporting “cleanup complete” does not itself prove the process has exited; a supervising parent still collects completion.
 
 ## Test a synchronization claim, not a timing guess
 
@@ -1833,7 +2176,7 @@ Finally, inherited masks can survive execution. A launcher that changes its own 
 ## Exercises
 
 1. **Repair the counterexample.** Describe a handler-and-wait solution in terms of when the selected signal is blocked, when the flag is tested, and how the wait changes the mask. Explain both the safety and progress obligations.
-2. **Test a different notification meaning.** Add a conceptual `SIGUSR1` status request. Would one output line for every ten rapidly sent requests be guaranteed? Compare a signal with a framed control pipe if every request must receive a distinct reply.
+2. **Test a different notification meaning.** Add a conceptual `SIGUSR1` status request. Would ten rapidly sent requests guarantee ten separate replies? Compare a signal with a framed control pipe if every request must receive a distinct reply.
 3. **Transfer: keep work running.** Change the program so worker threads continue processing while shutdown is awaited. State who owns the mask policy, how the stop decision reaches workers, and when shared resources may be released.
 
 **Write your version.** Explain why a request can be safely remembered yet still fail to produce progress. Use the lost-wakeup trace and the readiness protocol as two different examples of ordering that must be designed.
@@ -1854,7 +2197,7 @@ Finally, inherited masks can survive execution. A launcher that changes its own 
 
 # Chapter 8 — Reading a file through virtual memory
 
-Suppose you must count occurrences of one byte in a binary file. The file may contain zero bytes and may be empty. You need an exact count, bounded index arithmetic, and a clear failure result. Begin with an ordinary, stable regular file whose size fits the process's address-space model. Those conditions are input assumptions to examine, not properties established merely by opening a path.
+Suppose you must count occurrences of one byte in a binary file. The file may contain null bytes or be empty. You need an exact count, bounded index arithmetic, and a clear failure result. Begin with an ordinary regular file whose length and contents remain stable throughout the scan, and whose size fits the limits checked below. Those are input assumptions to examine, not properties established merely by opening a path.
 
 The counting problem does not require a memory mapping. A buffered read loop could solve it. We will compare that design with viewing the file through virtual memory, then choose a mapping so that its different ownership and failure boundaries become visible.
 
@@ -1873,9 +2216,9 @@ Initially `i` and `count` are zero. If the next byte matches, increase `count`; 
 
 This reasoning exposes two requirements that the storage interface must satisfy. Every accessed position must belong to the permitted range, and the bytes being inspected must have the stability required by “exact count.” A loop can stay within its numeric bounds while reading a mixture of versions. Bounds safety and snapshot consistency are different properties.
 
-Can we remove most of the scan before making it faster? For arbitrary bytes, an exact answer, and no trusted summary, consider any algorithm that leaves one position unexamined. Construct two same-length inputs identical at every examined position: the unexamined byte matches `wanted` in one and does not in the other. The algorithm has the same evidence for both, but their correct counts differ. It therefore cannot guarantee the answer. In the worst case, the input contains information we must inspect throughout its length, even if one machine instruction examines several bytes.
+Can we skip most of the scan? Suppose the input is arbitrary and no trusted summary is available. If an algorithm leaves one position unexamined, construct two files identical everywhere else: that byte matches `wanted` in one file and differs in the other. The algorithm has the same evidence for both, but their correct counts differ. An exact answer therefore requires examining every byte. One instruction may examine several bytes; the argument limits the information needed, not the instruction count.
 
-This lower bound belongs to the problem's assumptions. A trusted count associated with the exact immutable version could eliminate a later scan; accepting an estimate could permit sampling. Both change the available evidence or the required answer. Merely choosing `mmap()` changes neither. Establish what work is necessary before arguing about how cheaply an interface performs it.
+A trusted count for the exact immutable version could eliminate a later scan; an estimate could permit sampling. Choosing `mmap()` alone changes neither the available evidence nor the required answer.
 
 C strings would be the wrong representation for arbitrary binary input: an embedded zero is data, not an ending marker. An explicit length and `unsigned char` access preserve all byte values. The command accepts the desired value as decimal `0` through `255`; an argument itself cannot carry an embedded null byte.
 
@@ -1897,7 +2240,9 @@ Our one-pass byte counter has no requirement that makes mapping inevitable. The 
 
 ## Specify the assumptions around a mapping
 
-Virtual addresses identify locations in a process's address space. The operating system manages mappings at page granularity, but page size is not a universal constant such as 4096. If an algorithm needs it, query `sysconf(_SC_PAGESIZE)` and check the result. Our whole-file mapping starts at offset zero and lets the system select the virtual address, avoiding alignment arithmetic in this first version.
+The pointers used by this program refer to **virtual addresses** in its process. A mapping associates a range of those addresses with a range of the file. For a mapping starting at file offset zero, `bytes[i]` accesses file position `i`; the pointer value itself is not a file offset.
+
+The operating system manages mappings in units called **pages**. Page size is not a universal constant such as 4096. If an algorithm needs it, query `sysconf(_SC_PAGESIZE)` and check the result. Our whole-file mapping starts at offset zero and lets the system select the virtual address, avoiding alignment arithmetic in this first version. The requested length still defines our scan boundary, even if the system manages a larger page-aligned region.
 
 The roles of the statements in our design are different:
 
@@ -1923,13 +2268,15 @@ numeric count:                    accumulated -------- usable afterward
 
 After successful mapping, closing the descriptor does not end the mapping. Conversely, closing the descriptor alone is not how we release the address range. `munmap()` ends that lifetime, after which pointers into it are unusable. [Mapping and descriptor lifetime](https://man7.org/linux/man-pages/man2/mmap.2.html)
 
-The implementation therefore needs to retain the mapping's base address and length until release. Its scan pointer borrows access; it owns no independent lifetime. The final numeric count does not borrow the mapped bytes, so it can be printed after unmapping.
+The implementation must retain the mapping's base address and length so it can release the correct range. A pointer into that range borrows access: keeping a copy of the pointer does not keep the mapping alive. The final numeric count contains no pointer into the mapping, so it remains usable after unmapping.
 
-Derive the failure cleanup from acquired resources rather than from a generic label called “error.” Before mapping, only the descriptor is owned. After mapping and before closing, both are owned. During scanning, the mapping remains. A failed descriptor close after successful mapping still leaves a mapping to release. Drawing those states makes missed cleanup visible before the code grows more branches.
+Derive failure cleanup by asking which resources have been acquired. Before mapping, the program owns only the descriptor. After mapping and before closing, it owns both resources. During scanning, only the mapping remains. Even a failed descriptor close after successful mapping leaves that mapping to release. Drawing these states makes missed cleanup visible before the code grows more branches.
 
 ## Validate the boundary between integer domains
 
-`fstat()` reports size in signed `off_t`; the mapping interface accepts a `size_t` length. Casting does not prove representability. Reject a negative size and check the positive value against the destination range before converting. Otherwise, the numeric value used for bounds could cease to mean the measured file length.
+`fstat()` examines the opened object, so the size check and mapping concern the same file even if another process replaces its pathname. That does not stop anyone from modifying the opened object itself.
+
+The reported size has type `off_t`, a signed integer type; the mapping interface accepts a `size_t` length. Casting does not prove representability. Reject a negative size and check the positive value against the destination range before converting. Otherwise, the numeric value used for bounds could cease to mean the measured file length.
 
 Our example also restricts length to `PTRDIFF_MAX`. This is an explicit whole-file design limit that keeps the region within the range representable by pointer differences. It is not a promise that every smaller mapping will succeed. Available virtual address space and other resource limits still matter.
 
@@ -2045,13 +2392,42 @@ int main(int argc, char **argv)
 
 </details>
 
-The map is `PROT_READ` and `MAP_PRIVATE`. The failure test uses `MAP_FAILED`, not `NULL`. After a successful map, the descriptor is closed before the scan, making the independent lifetimes observable in the code. The scan advances only while `i < length`, and its count cannot exceed the validated length.
+The map uses `PROT_READ`, allowing loads but not stores through the mapping, and `MAP_PRIVATE`, whose limits we examine below. The failure test uses `MAP_FAILED`, not `NULL`. After a successful map, the descriptor is closed before the scan, making the independent lifetimes observable in the code. The scan advances only while `i < length`, and its count cannot exceed the validated length.
 
 The program checks release and final flushing before reporting success. A computed answer that never reaches its destination is not a successful command result. Failed closes are not blindly retried; descriptor reuse and the interrupted-close issues in Chapter 3 require an explicit policy.
 
+## Work through a smaller mapping window
+
+Suppose a later application needs 3,000 bytes beginning at file offset 5,000 rather than the whole file. For this worked example only, assume the queried page size is 4,096 and the stable file contains at least 8,000 bytes. The requested interval is `[5000, 8000)`. A portable mapping design aligns its starting file offset to a page boundary. [POSIX mapping alignment](https://pubs.opengroup.org/onlinepubs/9799919799/functions/mmap.html)
+
+Round the starting offset down, then preserve the displacement:
+
+```text
+base_offset = 5000 - (5000 % 4096) = 4096
+delta       = 5000 - 4096         = 904
+map_length  = 904 + 3000          = 3904
+```
+
+The requested mapping covers file bytes `[4096, 8000)`. If `mapping` is the returned base, the scan starts at `(const unsigned char *)mapping + 904` and examines exactly 3,000 bytes. Its first byte corresponds to file offset 5,000; its last corresponds to 7,999. The first 904 mapped bytes are alignment overhead for this operation, not part of the count.
+
+Keep both pointers conceptually distinct. The displaced pointer identifies the data to inspect; `mapping` identifies the resource to release. Cleanup uses `munmap(mapping, 3904)`, preserving the original base and requested mapped length. It does not use the displaced pointer. The implementation may round its internal coverage to pages, but that does not enlarge the application's permitted scan range.
+
+Before calculating in C, validate a nonnegative offset and a representable positive page size. Check the file range without overflowing: after confirming `offset <= file_size`, compare the requested length with `file_size - offset`. Check conversions and `delta + requested_length` separately against the mapping's size limits. Handle a zero requested length without mapping.
+
+**Predict:** keep offset 5,000 but increase the requested length to 4,000. What length must the mapping cover? Why is mapping only 4,000 bytes from offset 4,096 insufficient?
+
+<details>
+<summary>Review the window arithmetic</summary>
+
+
+The mapping must cover `904 + 4000 == 4904` bytes, through file offset 8,999 inclusive. The file must therefore contain at least 9,000 bytes. A 4,000-byte mapping from offset 4,096 covers only `[4096, 8096)`, leaving just 3,096 requested bytes after the displacement. Page rounding must not be used to excuse the incorrect length: request the entire range the algorithm intends to access.
+
+
+</details>
+
 ## Challenge the assumption that private means frozen
 
-“Private mapping” sounds like a private snapshot, but that intuition supplies a guarantee the interface does not make. The flag describes how writes through a private mapping relate to the underlying object; it does not promise a frozen version immune to external mutation. A shared mapping has different sharing behavior, but it likewise does not add an application transaction or locking protocol. [Mapping flags](https://man7.org/linux/man-pages/man2/mmap.2.html)
+"Private mapping" sounds like a private snapshot, but the flag provides no such guarantee. For a writable private mapping, changes made through that mapping do not update the underlying file. Whether later changes to the file become visible through the private mapping is unspecified. Our read-only mapping therefore still depends on the stable-file assumption. [POSIX mapping flags](https://pubs.opengroup.org/onlinepubs/9799919799/functions/mmap.html)
 
 A counterexample to “we checked the size, so reads are safe” is:
 
@@ -2120,30 +2496,39 @@ These requirements come before threads or locks. They describe an accounting pro
 
 Our **application contract** requires exactly 100,000 increments on success. Our **model** is that workers may be delayed between any operations; source-code order in one worker does not schedule another. The **platform contract** supplies shared memory, thread creation, and synchronization operations. Our **design choice** is to use a mutex for the common counter. An observed total of 100,000 on your machine is one execution that agrees with the contract. It is not the reason the design is correct.
 
-Three plausible implementations deserve consideration. One execution path can do all the work, avoiding coordination. Separate worker counters can be combined after the workers finish, avoiding competing writes. A shared counter can be protected during each update, providing the live common state we requested. The final-only variant would often favor private counters; this chapter intentionally retains the live-total requirement to study a shared invariant. None of these architectures acquires a speed advantage merely from its name.
+Several implementations deserve consideration:
+
+| Design | Requirement it can satisfy | Coordination it needs |
+| --- | --- | --- |
+| One worker | Exact final and live totals. | No concurrent counter access. |
+| Per-worker counters | Exact final total after combining results. | A completion boundary before reading each worker's result. |
+| Shared atomic counter | Exact updates to this one common counter. | Atomic operations for competing reads and updates; valid storage throughout. |
+| Shared counter under a mutex | Exact updates to a common state that can include several related fields. | One locking rule for the entire protected transition. |
+
+Where C11 atomics are supported, `atomic_fetch_add()` on an atomic integer can express the single-counter update without an application mutex. Atomic operations are not necessarily implemented without locks, and several atomic fields do not automatically form one atomic transaction. This chapter uses a mutex because the same reasoning extends to balances, queues, and other relationships among fields. Neither choice guarantees a speed advantage. [C11 draft N1570, sections 7.17.5 and 7.17.7.5](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
 
 Before optimizing that shared update, find the decision that needs it. Suppose “live total” came from a dashboard that refreshes once a second. That refresh interval alone does not tell us whether the displayed count may lag, must be exact at each refresh, or must account for an operation before its completion is acknowledged. Those are different contracts, even if their screenshots look alike.
 
-If the owner accepts delayed progress reports and an exact final result, workers can accumulate contributions privately and publish batches through a synchronized protocol. This removes some shared updates but introduces unpublished work and a rule for publishing the final partial batch. If acknowledgement requires the contribution to be committed first, batching cannot preserve immediate acknowledgement without further changes. Write the permitted delay before selecting a batch size. The first-principles step is to challenge why each shared update exists; deleting it is valid only after the resulting behavior satisfies the agreed requirement. This chapter keeps the original per-increment contract.
+If delayed progress reports are acceptable, workers can accumulate contributions privately and publish batches through a synchronized protocol. That reduces shared updates but creates unpublished work and a final partial batch to handle. If an operation must enter the common total before it is acknowledged as complete, batching must delay acknowledgement too. Specify the permitted delay before selecting a batch size. This chapter keeps the original per-increment contract.
 
-Threads share a process's globals, heap, and descriptors, while having separate stacks and execution state. That platform arrangement makes a shared pointer possible. It does not answer when the pointed-to object may be read or destroyed. Those are obligations of our design.
+Threads share a process's address space and descriptors, while having separate stacks and execution state. Separate stacks do not make their objects inaccessible to other threads: the sample passes workers a pointer to an object on `main`'s stack. Its storage must remain alive, and accesses to it must follow the synchronization protocol.
 
 ## Break the obvious implementation on paper
 
-Suppose both workers execute `++count` without synchronization. Before reading further, write a trace for two increments starting at seven. Represent each increment as a read, an addition, and a write. State the expected mathematical result, then find an ordering of those steps that loses an update.
+Suppose two workers execute `++count` without synchronization. Before reading further, write a trace for two increments starting at seven. Represent each increment as a read, an addition, and a write. State the expected mathematical result, then find an ordering of those steps that loses an update.
 
 <details>
 <summary>Review the counterexample</summary>
 
 
-Worker A reads seven; worker B reads seven; A stores eight; B stores eight. Two attempted contributions leave eight in this simplified machine model. This exposes the missing coordination, but it is not a complete prediction of an actual C program. Unsynchronized conflicting accesses, at least one a write, form a data race when the C rules' ordering and atomicity requirements are absent. A data race gives undefined behavior. The implementation does not promise only a sometimes-wrong count.
+Worker A reads seven; worker B reads seven; A stores eight; B stores eight. Two attempted contributions leave eight in this simplified machine model. This exposes the missing coordination, but it is not a complete prediction of an actual C program. These unsynchronized accesses to an ordinary shared variable form a data race: different threads access the same location, at least one writes, and no synchronization orders the accesses. A data race gives undefined behavior, so a sometimes-wrong count is not the only possible outcome.
 
 
 </details>
 
 The repair must therefore establish a valid ordering, not merely make the illustrated schedule less likely. `volatile` does not make an increment atomic or synchronize threads. Adding a sleep changes timing without creating the necessary relationship. Running a million successful trials does not add an ordering edge either.
 
-We need an indivisible state transition relative to the other workers. A mutex is a supplied mechanism for exclusive access and memory synchronization. All accesses that participate in the shared-counter protocol must follow the same rule: hold this mutex while workers can modify the counter. A hardware intuition about cache coherence cannot replace the C and pthread contracts.
+We need an indivisible state transition relative to the other workers. A **mutex** permits one thread at a time to own a lock; the operations performed while it owns that lock form a **critical section**. Locking also provides memory synchronization. While workers can modify the ordinary counter, every read or write of that counter must hold the same mutex. Protecting writers alone would leave an unlocked progress display with a data race. [POSIX memory synchronization](https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap04.html)
 
 ## Derive the state and the invariant
 
@@ -2245,7 +2630,9 @@ count=100000 expected=100000
 
 The Makefile uses `-pthread` when compiling and linking this program. The option expresses thread support to the toolchain; do not assume that naming a library alone is equivalent on every target.
 
-Compare your failure path with `started`. If creation fails, earlier workers continue, and the parent joins exactly those whose identifiers were produced successfully. Only then does it destroy the mutex. The pointer into `main`'s stack is valid because its owner remains active through all joins. Moving the object to the heap would not remove that lifetime obligation.
+Compare your failure path with `started`, the number of workers successfully created. If creation fails, earlier workers continue, and the main thread joins exactly those workers. Only then does it destroy the mutex. The shared object on `main`'s stack remains alive through all joins, so the workers' pointers to it stay valid. Moving the object to the heap would not remove that lifetime obligation.
+
+`pthread_create()` passes the pointer value; it does not copy the object the pointer designates. Initialize each argument before creating its worker, because the worker may run immediately. If workers need separate arguments, keep one stable object per worker. Passing every worker the address of a changing creation-loop variable would give them shared mutable state, not separate snapshots. [POSIX thread arguments](https://pubs.opengroup.org/onlinepubs/000095399/functions/pthread_create.html)
 
 The pthread creation and join interfaces return an error number directly rather than using `-1` plus `errno`. The program therefore passes that returned value to `strerror`. It treats unexpected synchronization errors as fatal to this small process; a library would need an explicit propagation policy. Successful joining establishes that the selected worker has terminated. [POSIX thread creation](https://man7.org/linux/man-pages/man3/pthread_create.3p.html), [POSIX joining](https://man7.org/linux/man-pages/man3/pthread_join.3p.html)
 
@@ -2261,7 +2648,7 @@ The sample makes no speedup claim. A useful hypothesis would be: “For independ
 
 ## Derive waiting from a queue predicate
 
-Now change the problem: a consumer must wait until a queue contains an item or has been permanently closed. Busy checking wastes execution time while nothing changes. A fixed sleep adds delay and still supplies no state synchronization. We want to suspend until progress may be possible.
+Now change the problem: a consumer must wait until a queue contains an item or has been permanently closed. A predicate is a condition on shared state; here, `queue.count > 0 || queue.closed` lets the consumer proceed. Repeatedly checking an unchanged queue wastes execution time. A fixed sleep adds delay and still supplies no state synchronization. We want to suspend until progress may be possible.
 
 A naive plan checks `queue.count == 0`, unlocks, then sleeps awaiting a notification. Predict the failure if the producer inserts and notifies between that unlock and the start of the wait. Another naive plan keeps the mutex locked while sleeping. Predict why the producer cannot repair the empty queue in that version.
 
@@ -2277,7 +2664,36 @@ while (queue.count == 0 && !queue.closed)
 pthread_mutex_unlock(&queue.mutex);
 ```
 
-The queue state remembers whether work exists. The notification merely tells sleepers to reconsider. A producer changes state under the same mutex and signals. Closing sets `closed` under the mutex and broadcasts so every waiting consumer can discover that no more work will arrive. Without a closing state, an empty queue cannot distinguish “wait for a future item” from “there will never be another item.”
+### Trace a wakeup that finds no item
+
+Let consumer A be waiting on an empty, open queue. Consumer B is processing an earlier item outside the queue lock. The producer adds one new item, `X`, and signals while holding the mutex. Choose a schedule in which A is awakened but B reaches the mutex first after the producer releases it:
+
+| Step | Mutex owner | Protected queue state | What consumer A can do |
+| --- | --- | --- | --- |
+| Producer inserts `X`. | Producer | One item; open. | Remain asleep until notified. |
+| Producer signals. | Producer | One item; open. | Become eligible to resume, but cannot yet own the mutex. |
+| Producer unlocks; B acquires. | B | One item; open. | Still wait to reacquire the mutex. |
+| B removes `X` and unlocks. | None | Empty; open. | Compete for the mutex. |
+| A reacquires; its wait returns. | A | Empty; open. | Recheck the predicate and wait again. |
+
+The notification did not reserve `X` for A. Replacing `while` with `if` would let A continue as though an item existed, potentially reading an empty slot or decrementing a zero count. This schedule needs no spurious wakeup; ordinary competition is enough to require the loop. [POSIX condition waiting](https://pubs.opengroup.org/onlinepubs/9799919799/functions/pthread_cond_clockwait.html)
+
+Now inspect A's next wait. It checks the empty state while owning the mutex. A producer cannot change that protected state yet. When A calls `pthread_cond_wait()`, releasing the mutex and beginning the wait form one coordinated transition relative to a producer that acquires the mutex and then signals. There is no exposed interval equivalent to “unlock, then call a separate sleep.” An item present at A's locked check prevents it from waiting; a producer that inserts after the wait transition can wake it. The predicate and the coordinated wait cover both orders.
+
+**Predict:** both consumers are now waiting on an empty queue. The owner closes the queue but uses `pthread_cond_signal()` once instead of broadcasting. The program no longer submits items. Is eventual termination of both consumers guaranteed? Does changing the waiting loop to `while (queue.count == 0)` help?
+
+<details>
+<summary>Review the shutdown schedule</summary>
+
+
+One signal need only wake one waiter. The other may remain asleep indefinitely because there will be no further state changes or notifications. Broadcasting makes every current waiter reconsider the closing state. Each then reacquires the mutex and sees `closed && count == 0`, allowing an ordinary return. A loop that tests only emptiness would send even awakened consumers back to sleep: closure must be part of the predicate as well as a reason to notify.
+
+
+</details>
+
+The queue state remembers whether work exists. The notification merely tells sleepers to reconsider. A producer changes state under the same mutex and signals. Closing sets `closed` under the mutex and broadcasts so every waiting consumer can discover that no more work will arrive. Consumers still remove items from a closed queue until it is empty; only then are they finished. Without a closing state, an empty queue cannot distinguish “wait for a future item” from “there will never be another item.”
+
+Use `signal` when one newly available item lets one waiting consumer proceed. Use `broadcast` for closure because every waiting consumer must recheck its exit condition. Neither operation transfers mutex ownership or stores a notification for future waiters. A later consumer examines the persistent queue state before deciding whether to wait. [POSIX condition notifications](https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_broadcast.html)
 
 This is also why cooperative shutdown is attractive: workers leave through ordinary control flow and release owned resources. Thread cancellation introduces additional questions about the locks and objects owned at the interruption point.
 
@@ -2309,7 +2725,7 @@ For a service variation, let the caller cancel a job after a worker starts using
 
 # Chapter 10 — Deriving a protocol from incomplete information
 
-We want two local processes to exchange a request and a verified reply. The request may contain arbitrary bytes, has a maximum size of 4096 bytes, and must be returned unchanged. The receiver must reject an incomplete request rather than silently accepting a prefix. Neither side should allocate memory proportional to an unchecked value supplied by the other.
+We want two local processes to exchange a request and check that its reply contains exactly the same bytes. A request may contain up to 4096 arbitrary bytes, including zero bytes. If the stream ends partway through a request, the receiver must report failure instead of accepting the prefix. Neither side may allocate memory proportional to an unchecked value supplied by the other.
 
 These are application requirements. They do not yet prescribe TCP, a header, or a C function. Our chosen experiment uses one TCP connection on IPv4 loopback, handles at most one request, and exits. The command-line client accepts a string argument, so it cannot originate embedded NUL bytes even though the wire format can represent them.
 
@@ -2334,16 +2750,25 @@ This is a reasoning pattern worth preserving: identify what the observer can kno
 
 A delimiter, a declared length, and connection termination are plausible designs. Delimiters are convenient for text, but arbitrary bytes require escaping or a restricted alphabet. Termination can delimit one request if the client closes its sending direction and leaves the receiving direction available for the reply; it couples message completion to connection lifecycle. A declared length supports arbitrary bytes and can later support several frames on a connection, but introduces a size field that must be validated.
 
-We choose a length prefix. That choice follows our binary-message and explicit-validation goals. The exact four-byte width and byte-order convention remain design choices; they are not mathematical consequences of networking.
+We choose a length prefix because it identifies the end of an arbitrary byte sequence and lets the receiver reject an oversized message before reading its body. Four bytes and network byte order are conventions we choose for this protocol; the requirements do not uniquely determine them.
 
 | Field | Encoding | Rule |
 | --- | --- | --- |
 | Length | Four-byte unsigned integer, network byte order | Between zero and 4096 inclusive |
 | Body | Exactly the declared number of bytes | No terminator or escaping |
 
-The length excludes the header. An empty body is therefore represented by a complete four-byte header containing zero. It is different from a connection that sends no bytes at all.
+The length excludes the header. An empty body is therefore represented by a complete four-byte header containing zero. It is different from a connection that sends no bytes at all. The reply uses the same framing rule as the request.
 
-Challenge the inherited width before treating it as necessary. How many distinct lengths must a fixed-width length field represent? Could one byte work? Could two? Commit your answer from the allowed values, without using a familiar protocol as the justification.
+For example, the two body bytes `41 00` travel as this six-byte frame, written here in hexadecimal:
+
+```text
+header          body
+00 00 00 02     41 00
+```
+
+The final zero is data, not a terminator. The receiver completes this frame after six bytes regardless of how many reads delivered them. It does not wait for the sender to close the connection.
+
+Challenge the chosen width before treating it as necessary. How many distinct lengths must a fixed-width length field represent? Could one byte work? Could two? Justify your answer from the allowed values, without appealing to a familiar protocol.
 
 <details>
 <summary>Derive the information needed</summary>
@@ -2362,22 +2787,53 @@ Before the first byte, the receiver needs four bytes of header storage and a cou
 
 The invariants are small enough to state directly: header bytes collected stay between zero and four; a validated length stays at most 4096; body bytes collected stay between zero and that length. Buffer addresses always refer to the unfilled suffix, and each positive transfer advances progress exactly once. The maximum is checked before reading the body, so even an enormous declared length cannot expand our storage requirement.
 
+Follow a complete frame through those states. Suppose its bytes are `00 00 00 05 41 00 42 ff 43`, written in hexadecimal. The first four declare a five-byte body. The following is one possible sequence of read results, not a prediction of packet boundaries:
+
+| Call | Field and bytes requested | Bytes returned | State after the call |
+| --- | --- | --- | --- |
+| 1 | Header, 4 | `00` | Header offset 1; length still unknown |
+| 2 | Header, 3 | `00 00` | Header offset 3; length still unknown |
+| 3 | Header, 1 | `05` | Header complete; decode and validate length 5 |
+| 4 | Body, 5 | `41 00` | Body offset 2; three bytes remain |
+| 5 | Body, 3 | `42` | Body offset 3; two bytes remain |
+| 6 | Body, 2 | `ff 43` | Body complete; reply may begin |
+
+Call 2 writes at `header_bytes + 1`, preserving the byte already received. Call 5 writes at `body + 2`, preserving both earlier body bytes, including the zero. The receiving loop never asks for more than the current field's unfilled suffix. Even if the entire frame is already waiting in the socket, the first header read requests only four bytes; body bytes remain for the body read. A design that reads into a larger shared buffer instead needs an additional count of buffered bytes not yet parsed.
+
+Before continuing, predict two variations. First, EOF follows call 4. Can the body be printed as a shorter valid request? Second, the completed header is `00 00 10 01`. What length does it declare, and which body read should happen?
+
+<details>
+<summary>Review the frame trace</summary>
+
+
+EOF after call 4 violates the promise of five body bytes: receiving two does not revise the promised length. Treating the body as a C string would also be wrong, because the zero byte would hide valid data. The second header declares hexadecimal `1001`, or decimal 4097. Reject it before any body read. Validation changes which state is reachable: the oversized length must never become the bound of a body-transfer loop.
+
+
+</details>
+
 For blocking I/O, these states can live in a function's local variables and loop position. Chapter 11 will move them into longer-lived objects when a handler must return before completion. The logical state exists in either design, whether or not a `struct` names it.
 
-Now classify EOF. Commit answers for four cases before opening the review: no header bytes, two header bytes, a complete header announcing five followed by two body bytes, and a complete zero-length header.
+Now classify EOF. Commit answers for four cases before opening the review: no header bytes; two header bytes; a complete header announcing five body bytes followed by only two; and a complete header announcing an empty body.
 
 <details>
 <summary>Review the EOF cases</summary>
 
 
-With no header bytes, no request started; our server chooses to close successfully without replying. Two header bytes mean a truncated header. Five promised body bytes followed by only two mean a truncated body. A zero-length header describes a complete request immediately and receives a zero-length reply. Completion depends on protocol position, not simply on whether `read` returned zero somewhere.
+| State when the stream ends | Meaning and server action |
+| --- | --- |
+| No header bytes received | No request started; close successfully without replying |
+| Two of four header bytes received | Truncated header; report failure |
+| Complete header declares five body bytes; only two arrive | Truncated body; report failure |
+| Complete header declares zero body bytes | Request already complete; reply with a zero-length frame |
+
+The empty frame requires no body read. For the other cases, EOF means a read requesting a positive number of bytes returned zero. The protocol state tells us whether that end is acceptable.
 
 
 </details>
 
 ## Derive the sender's obligation
 
-The sender faces the same progress problem in reverse. A successful write can accept only a prefix of the requested bytes. Its invariant is that bytes before `offset` have been accepted by the local write operation and bytes at or after `offset` remain to be submitted. Retry an interrupted transfer without advancing; advance by the returned positive count; fail on other errors. Restarting from byte zero after a short write duplicates the prefix and corrupts the frame.
+The sender faces the same progress problem in reverse. A successful write can accept only a prefix of the requested bytes. Its invariant is that bytes before `offset` have been accepted by the local write operation and bytes at or after `offset` remain to be submitted. A `-1` result with `errno == EINTR` leaves the offset unchanged; a positive result advances it by that count. Other errors fail the operation. Restarting from byte zero after a short write duplicates the prefix and corrupts the frame.
 
 Both programs ignore `SIGPIPE`, allowing broken-connection writes to follow an error-return path instead of terminating through that signal. Successful writing does not prove that the peer application processed the request. The client therefore reads a reply and verifies both its length and its bytes. [Send interface and SIGPIPE](https://man7.org/linux/man-pages/man2/send.2.html)
 
@@ -2387,7 +2843,7 @@ This distinction matters when extending an echo protocol to operations with side
 
 Loopback confines the demonstration to the local machine. Binding port zero asks the kernel to choose an available port; `getsockname` retrieves it. Printing and flushing `PORT N` publishes the selected address to a supervising process. Merely calling `printf` would leave publication dependent on stdio buffering.
 
-The listening descriptor owns the ability to accept a connection. `accept` produces a separate descriptor for that connection's stream. Both need cleanup. One connection is a deliberate bound on this experiment, not a claim that `listen(..., 1)` prevents every other connection attempt or defines a service-wide concurrency policy.
+The listening descriptor refers to the socket that accepts connections. `accept` produces a separate descriptor for the connected stream, so the server now owns two descriptors to clean up. The program handles one connection by stopping after one successful `accept`. The backlog argument in `listen(..., 1)` concerns queued connection requests; it does not enforce this application policy.
 
 Before opening the implementations, sketch the server's resource ownership after socket creation, binding, accepting, and receiving a bad length. Your cleanup path must work from every reached state, including failure before a connection descriptor exists.
 
@@ -2690,7 +3146,9 @@ int main(int argc, char **argv)
 
 </details>
 
-Check the two `read_full` contracts rather than assuming identical helper names imply identical semantics. The server needs to distinguish clean initial EOF from truncation. The client is expecting a reply, so missing required reply bytes are always failure. Both treat a request for zero bytes as already complete.
+Check the two `read_full` contracts rather than assuming identical helper names imply identical semantics. On the server, the helper's result 0 means EOF before any bytes of the current call, not necessarily before the request. The caller accepts that result while starting the header but rejects it while waiting for a nonempty body. The client is expecting a reply, so missing required reply bytes are always failure. Both helpers treat a request for zero bytes as already complete, without calling `read`.
+
+The server consumes one frame and then closes. It does not wait for EOF to validate that no extra bytes followed the frame. A protocol that requires exactly one frame and rejects all trailing bytes would need another completion rule, such as the client's sending-direction shutdown. Our one-request policy means that a second frame receives no service.
 
 The client treats interrupted `connect` as failure and closes the socket. A connection attempt is not a byte-transfer loop whose remaining suffix is described by an offset. A more capable client would explicitly manage connection progress. Likewise, final `close` calls are attempted once; blindly retrying descriptor cleanup can act on a number whose underlying lifetime has changed.
 
@@ -2759,7 +3217,7 @@ A stronger correctness experiment varies how a test peer submits header and body
 
 The receiver's storage bound is a safety property. It says unchecked input cannot grow this body buffer. It says nothing about how soon the operation completes. A peer can send one header byte and remain connected indefinitely. The server can also wait indefinitely in `accept` before any peer connects. The C examples deliberately have no internal deadlines.
 
-A useful progress policy distinguishes connection establishment, complete-request arrival, queued-reply delivery, and idle connections. Resetting a five-second timer after every byte lets a sufficiently slow sender extend the session indefinitely. An absolute request deadline states when the complete request must arrive. It is a policy choice, expressed against an elapsed-time clock, rather than an inevitable consequence of framing.
+A progress policy can set separate limits for connection establishment, complete-request arrival, reply delivery, and idle connections. With a five-second idle timeout that resets after each byte, a peer can send one byte every four seconds; a 4096-byte body then takes more than four hours without violating the idle limit. An absolute request deadline instead fixes when the complete request must arrive. Define its starting event and measure the remaining interval with a monotonic clock. Framing determines when a message is complete; the deadline determines how long we will wait for it.
 
 The service also has no authentication, encryption, or general concurrent-client handling. Moving the address from loopback to a remote-facing interface changes the assumptions under which those omissions were acceptable for this experiment. No measurement here establishes network throughput or response-time guarantees.
 
@@ -2793,13 +3251,13 @@ Now replace the echo with a deterministic computation over a named input. The co
 
 Suppose two peers have work in progress. One has sent half a request and pauses; the other has sent a complete request. We want the second to progress without waiting for the first. We also require bounded memory, preservation of every accepted byte, and an explicit way to retire completed or failed operations.
 
-The central problem is unfinished work. We need to remember enough about an operation to pause it safely, attend to something else, and resume it later. An event loop is one architecture for meeting that need. This chapter derives its state and scheduling rules, then studies them in a finite pipe experiment before applying the argument to sockets.
+The central problem is unfinished work. We need to remember enough about an operation to pause it safely, attend to something else, and resume it later. An event loop organizes these pauses: it waits for useful events, advances the corresponding operations, and retains their unfinished state. This chapter derives those state and scheduling rules through a finite pipe experiment, then applies the argument to sockets.
 
 ## Compare where waiting can live
 
 One thread per connection lets ordinary blocking calls preserve progress on each thread's stack. This can be a reasonable, clear design at an appropriate scale, with bounds on thread count and resource use. One process per connection adds stronger address-space separation and a different resource cost. A single event-loop thread keeps operation state in explicit objects and centralizes waiting, avoiding a separate blocked thread for each connection while making control flow more explicit.
 
-Our design choice is the third architecture. It is not a claim that one thread is universally faster. The application requirement is independence of progress; threads and event loops can both satisfy it under suitable assumptions. Actual latency, throughput, and complexity must be assessed for the workload.
+We choose a single event-loop thread for this experiment. Both threads and event loops can let one connection progress while another waits. Their latency, throughput, resource cost, and implementation complexity depend on the workload; the choice here lets us examine the unfinished state directly.
 
 Here is the naive event loop: wait until some descriptor is readable, then call Chapter 10's blocking `read_full` for that connection. Before reading the review, trace what happens if one header byte is available and the other three are delayed. State whether placing a timeout on the readiness wait fixes the problem.
 
@@ -2814,13 +3272,23 @@ Readiness allows the first byte to be read. `read_full` then waits for the remai
 
 ## Derive the three kinds of result
 
-A resumable transfer needs to distinguish progress, temporary inability to progress, and final completion or failure. A positive byte count advances state. A temporary result preserves it for later. EOF or a fatal error invokes the protocol's completion or failure rules.
+A resumable transfer needs to distinguish progress, temporary inability to progress, and final completion or failure. For a read into an unfinished header or body, the decisions are:
+
+| Read result | State change | Next action |
+| --- | --- | --- |
+| Positive count | Advance the received-byte count | Process the completed field or continue within this turn's budget |
+| `-1`, `EAGAIN` or `EWOULDBLOCK` | Preserve progress | Return to the dispatcher and wait for readiness |
+| `-1`, `EINTR` | Preserve progress | Retry, subject to cancellation and deadline policy |
+| Zero, after requesting at least one byte | Record the end of input | Apply the protocol's EOF rule for this phase |
+| `-1`, other error | Record failure | Retire the operation and release its resources |
+
+Inspect `errno` only after a failure result. An interrupted read that already transferred bytes returns the positive count, which must be consumed once. [POSIX read results](https://man7.org/linux/man-pages/man3/read.3p.html)
 
 POSIX supplies nonblocking operation through `O_NONBLOCK`. A read or write that would wait can return `EAGAIN` or `EWOULDBLOCK`; portable code checks both. These are interface contracts, not guesses based on how fast a previous call returned. To preserve existing file status flags, fetch them with `F_GETFL` and combine them with `O_NONBLOCK` when calling `F_SETFL`. Duplicated and inherited descriptors may share those status flags through the same open file description. [File-status flag contract](https://man7.org/linux/man-pages/man2/F_GETFL.2const.html)
 
 Now we need a way to avoid repeatedly trying an operation that cannot progress. `poll` accepts descriptors and desired events, then reports readiness through returned event bits. `POLLIN` concerns reading; `POLLOUT` concerns writing. Readiness does not promise that an entire application frame can transfer. We still use nonblocking calls and interpret their results. [POSIX poll contract](https://man7.org/linux/man-pages/man3/poll.3p.html)
 
-Notice the division of responsibility: `poll` decides when trying is useful; the transfer result determines what happened; the protocol decides what that result means. Confusing these layers is how “readable” becomes the false claim “a complete request exists.”
+Keep the three decisions separate. `poll` reports a reason to try an operation. The read or write result tells us whether bytes moved, the operation would block, or an end or error occurred. The protocol then interprets that result in its current phase. For example, EOF before a header and EOF halfway through one have different meanings even though both reads return zero.
 
 ## Derive the persistent state
 
@@ -2833,7 +3301,7 @@ A framed connection needs a current phase and enough progress information to res
 | Reply | Output bytes and bytes already accepted | No output remains |
 | Closing | Failure or completion reason and owned resources | Cleanup finishes |
 
-For a reply of length `n`, maintain `0 <= sent <= n`. Only a positive write count changes `sent`; a temporary failure leaves it unchanged. A function-local offset that is discarded on return cannot satisfy this requirement. Neither can reusing the input buffer for the next request while the pending reply still refers to its bytes.
+For an output buffer containing `n` bytes, maintain `0 <= sent <= n`. Here `n` counts all bytes in that buffer, including framing bytes if the header and body are stored together. Only a positive write count changes `sent`; a temporary failure leaves it unchanged. A function-local offset that is discarded on return cannot satisfy this requirement. Neither can reusing the input buffer for the next request while the pending reply still refers to its bytes.
 
 Suppose a socket write is asked to send 100 bytes, accepts 37, and the next attempt returns `EAGAIN`. Commit to the next buffer address and length before continuing: they are the original buffer plus 37 and 63 bytes. Returning to the dispatcher changes scheduling, not ownership of the remaining bytes.
 
@@ -2841,7 +3309,7 @@ Interest in events is itself derived state. Request `POLLOUT` while output remai
 
 ## A smaller experiment with the same obligations
 
-Our executable uses a pipe and two processes so we can inspect progress without also implementing connection management. The child generates exactly 65,536 bytes, with byte `i` equal to `i % 251`. The parent counts bytes and adds their values. Both pipe ends are nonblocking; buffers remain fixed in size.
+Our executable uses a pipe and two processes so we can inspect progress without also implementing connection management. It exercises the transfer rules for one stream; the two-client dispatcher remains an exercise. The child generates exactly 65,536 bytes, with byte `i` equal to `i % 251`. The parent counts bytes and adds their values. Both pipe ends are nonblocking; buffers remain fixed in size.
 
 The writer's state is `sent`, and its invariant is that the accepted prefix matches the specified sequence. The reader's state is a count and sum, with `count <= TOTAL_BYTES`. There is a separate lifecycle obligation: close unused pipe ends and reap the child. A stream ending is insufficient evidence that the producer completed successfully.
 
@@ -3044,7 +3512,7 @@ The expected successful output is:
 bytes=65536 checksum=8189175
 ```
 
-The writer regenerates each chunk from the total `sent`, so the next chunk begins at the correct position even after a short write. The consumer sums only the bytes actually returned and rejects a count beyond the planned total. Success also requires normal, successful child termination.
+The writer regenerates each chunk from the total `sent`, so the next chunk begins at the correct position even after a short write. The consumer sums only the bytes actually returned and rejects a count beyond the planned total. Success also requires normal, successful child termination. To check the expected sum independently, divide the sequence into 261 complete cycles of bytes 0 through 250 and a final cycle of bytes 0 through 24: `261 × 31375 + 300 = 8189175`.
 
 The compact example attempts unused-end closes once without inspecting their results; it checks the final closes of the active data ends. Its progress argument assumes the unused ends were released. It does not establish that every cleanup failure is detected. A production variant needs an explicit platform-specific close policy, especially where an interrupted close can leave ownership uncertain.
 
@@ -3071,23 +3539,50 @@ The opposite failure is equally revealing: if the parent accidentally retains an
 
 ## Derive backpressure from conservation
 
-Let `q` be queued reply bytes, `a` newly accepted reply bytes, and `d` bytes successfully sent. Across one transition, the accounting model is `q_next = q + a - d`. If accepted work repeatedly exceeds completed work, the queue grows. Faster allocation cannot change that relationship.
+Let `q` be reply bytes waiting to be written, `a` bytes added to that queue, and `d` bytes removed after positive write results. Across one transition, the accounting model is `q_next = q + a - d`. Here, removing bytes means the local write accepted them; it does not prove the peer application processed them. If additions repeatedly exceed removals, the queue grows. Faster allocation cannot change that relationship.
 
 For a fixed memory budget `B`, the invariant is `0 <= q <= B`. Before accepting work, reserve enough capacity for the output it can require. When that capacity is unavailable, the design must defer input, reject work according to its protocol, or release other capacity. Unlimited buffering is incompatible with the stated bound.
 
-One policy pauses reading at a high-water mark and resumes below a lower threshold. The gap reduces repeated toggling near one boundary. Another policy allows only one outstanding request per connection. That simplifies ownership and bounds but limits pipelining. Both are plausible choices; the required invariant does not dictate one exact threshold.
+One policy pauses reading when queued output reaches a chosen upper threshold and resumes below a lower threshold. The gap avoids repeatedly pausing and resuming near a single boundary. Another policy allows only one outstanding request per connection. That simplifies ownership and bounds but limits pipelining. Both policies still need the capacity reservation above: a threshold alone does not bound the output of work already accepted.
 
 Per-connection bounds do not establish a global bound when connection count is unlimited. Account for the number of connections, each connection's fixed storage, and all queued bytes. Also consider dependency cycles: if two peers stop reading until their own pending writes finish, both can stall. Backpressure needs a protocol in which capacity can eventually be released.
 
 Put numbers into that model before tuning the allocator. Suppose an initially empty reply queue has 64 KiB of capacity, accepted work produces 48 KiB of reply bytes per second, and sending completes 16 KiB per second. Under these sustained rates, the queue fills in two seconds: `64 / (48 - 16)`. Doubling capacity buys two more seconds; it does not permit those rates indefinitely. A bigger buffer could absorb a short burst, but sustained excess requires changing acceptance or completion rates.
 
-The uncertain assumption is now specific: is the excess a bounded burst or an ongoing condition? Record queue growth during the relevant workload instead of starting with an allocator comparison. Separately, keep offering requests while a test peer pauses its reading until capacity is exhausted, then resume reading. Predict when input should pause and resume, and verify the memory bound and accepted bytes. For this sustained-load problem, a faster dispatcher helps only if it addresses the limiting work identified by the model.
+Now account for unfinished requests and storage that a partial write cannot release. Suppose each request produces exactly 4 KiB of output, including framing, in one buffer retained until its final byte is sent. The reply-buffer budget is 12 KiB. Let `r` be capacity reserved for unfinished requests and `b` be capacity held by completed reply buffers. The pending-byte count `q` can be smaller than `b`: sending half a reply leaves its entire buffer allocated.
+
+Admission must preserve `b + r <= 12 KiB`. Completion transfers a four-KiB charge from `r` to `b`. A partial write decreases only `q`; finishing and releasing a buffer also decreases `b`. In this table, uncommitted capacity is `12 KiB - b - r`:
+
+| Event | Pending `q` | Buffers `b` | Reserved `r` | Uncommitted capacity |
+| --- | --- | --- | --- | --- |
+| Admit A | 0 KiB | 0 KiB | 4 KiB | 8 KiB |
+| Admit B | 0 KiB | 0 KiB | 8 KiB | 4 KiB |
+| A completes | 4 KiB | 4 KiB | 4 KiB | 4 KiB |
+| Admit C | 4 KiB | 4 KiB | 8 KiB | 0 KiB |
+| Write 2 KiB of A's reply | 2 KiB | 4 KiB | 8 KiB | 0 KiB |
+| B completes | 6 KiB | 8 KiB | 4 KiB | 0 KiB |
+| Write A's final 2 KiB; release its buffer | 4 KiB | 4 KiB | 4 KiB | 4 KiB |
+
+Before opening the review, identify the earliest row after admitting C at which D can be admitted. Does B's completion release capacity? What would go wrong if admission checked only `q`?
+
+<details>
+<summary>Review the reservation trace</summary>
+
+
+D can enter after the last row, when A's buffer is released. Its earlier partial write made progress without freeing reusable storage. B's completion also releases nothing: its reservation becomes a buffer charge. Checking only `q` misses both unfinished requests' future output and storage retained for bytes already sent. The table bounds reply byte-array capacity under this allocation policy; allocator overhead, input buffers, and worker state need separate accounting. If replies have variable size, reserve a justified upper bound or use a protocol that lets production pause as space becomes available.
+
+
+</details>
+
+For the earlier rate example, the uncertain assumption is now specific: is the excess a bounded burst or an ongoing condition? Record queue growth during the relevant workload instead of starting with an allocator comparison. Separately, keep offering requests while a test peer pauses its reading until capacity is exhausted, then resume reading. Predict when input should pause and resume, and verify the memory bound and accepted bytes. For this sustained-load problem, a faster dispatcher helps only if it addresses the limiting work identified by the model.
 
 ## Separate safety from fairness and deadlines
 
-The offsets and bounds protect data and memory. Progress additionally depends on giving operations opportunities to run. Draining one busy socket until `EAGAIN` can monopolize the loop if new input keeps arriving. Limit bytes or operations per connection per pass when many connections share the dispatcher. Our pipe experiment has one producer and a fixed total, so its drain loop is bounded by that total.
+The offsets and bounds protect data and memory. Progress additionally depends on giving operations opportunities to run. Draining one busy socket until `EAGAIN` can monopolize the loop if new input keeps arriving. Limit bytes or operations per connection per pass when many connections share the dispatcher. Our pipe experiment has one producer and a fixed total, so the successful byte-processing work is bounded by that total; retries and waits need separate reasoning.
 
-The sample's five-second timeout is per wait. An `EINTR` retry restarts that interval; repeated progress starts new waits too. It is not an absolute deadline for the process. A real request deadline can be represented as an expiration on a monotonic clock, with remaining time recalculated before each wait. Handling expiry is another state transition.
+For example, A has 8 KiB ready and B has 1 KiB. With a 1 KiB read budget per visit and both descriptors visited each pass, B gets a turn after at most 1 KiB is processed from A. Draining A first would put 8 KiB ahead of B, or indefinitely more if A keeps receiving. The budget bounds work ahead of B only if each byte's processing and each handler's other work are also bounded.
+
+The sample's five-second timeout is per `poll` wait. An `EINTR` retry restarts that interval; repeated progress starts new waits too. The final `waitpid` and output flush also have no timeout. The five-second value therefore does not bound process completion. A request deadline can be represented as an expiration on a monotonic clock, with remaining time recalculated before each wait. Handling expiry is another state transition, with its own rules for cancelling work and releasing resources.
 
 Regular files generally report ready; a subsequent storage operation may still incur latency. Lengthy computation, synchronous file I/O, or a blocking log destination can therefore delay every connection on an event thread. “Uses nonblocking sockets” is narrower than “every handler has bounded execution time.”
 
@@ -3121,15 +3616,15 @@ For a compute-service variation, the network loop submits bounded jobs to worker
 
 You have two decisions to make. A streaming search sometimes misses a match near an input boundary, and you must decide whether a proposed fix addresses the cause. Someone also proposes a larger input buffer as a performance improvement, and you must decide whether the added resource cost is justified.
 
-The goal is evidence strong enough for those decisions. The constraints are limited investigation time, tools that observe only part of execution, and a machine whose timing varies. Running more commands is useful only when their results can distinguish plausible explanations.
+The goal is evidence strong enough for those decisions. Investigation time is limited, each tool sees only part of execution, and timings vary from run to run. Begin with a question that an observation can answer. A command earns its place in the investigation when different results would lead you to different next steps.
 
 ## Make the claim smaller than the uncertainty
 
-For the suspected bug, the application contract says read boundaries must not alter search results. A model of a faulty implementation says it discards a partial match after each input chunk. An observation might be a missing match in one supplied file. The hypothesis is that discarding state caused that missing match. These are different statements: the contract tells us what should happen, the model suggests a mechanism, and the observation needs an explanation.
+For the suspected bug, the contract says read boundaries must not alter search results. The observation is a missing match in one input. One hypothesis is that the implementation discards a partial match after each chunk. Keep those statements distinct: the contract defines the required result, the observation records what happened, and the hypothesis proposes a cause that an experiment can challenge.
 
 Write down the command, input bytes, expected output and status, actual output and status, and build identity. “Sometimes wrong” is not yet a reproducer. “Correct after adding a print” is an observation about an intervention, not proof that printing repaired the design.
 
-For a candidate implementation, compare two plausible causes: state is lost at a chunk boundary, or a line-buffering design forgets to process its last unterminated line at EOF. A large file can exhibit both. Feed `nee` then `dle\n`, then separately supply `needle` without a newline and end the input. Different failures point toward different transitions.
+Compare two plausible causes: state is lost at a chunk boundary, or a line-buffering design forgets to process its last unterminated line at EOF. A large file can exhibit both. Use pattern `needle` in two small experiments. In the first, call the matcher directly with `nee` and then `dle\n`. In the second, supply `needle` in one chunk and end the input. Direct calls control chunk boundaries; two writes to a pipe do not guarantee two corresponding reads.
 
 Before checking the implementation, commit your predictions for each hypothesis. If either hypothesis could explain every possible outcome, it is too vague to guide this experiment.
 
@@ -3137,16 +3632,56 @@ Before checking the implementation, commit your predictions for each hypothesis.
 <summary>Review the discriminating cases</summary>
 
 
-A boundary-state defect can fail the split `nee`/`dle\n` case even though finalization is unnecessary to recognize the completed newline-terminated line. A finalization defect can fail the unterminated-line case even when the pattern arrives in one chunk. Both defects may coexist, so a result narrows the investigation without establishing that only one fault exists.
+Assume each proposed defect is the only fault, and that ordinary matching works:
+
+| Hypothesis | Feed `nee`, then `dle\n` | Feed `needle`, then signal EOF |
+| --- | --- | --- |
+| Partial-match state is discarded between chunks | Match can be lost | Match is found |
+| A buffered final line is discarded at EOF | Match is found when the newline arrives | Match is lost |
+
+Each experiment requires one report for line 1. Together, they distinguish these hypotheses better than one large failing input. Both defects may coexist; if both cases fail, do not force the result into a one-bug explanation.
 
 
 </details>
 
 ## Derive a test from an invariant
 
-The matcher's state summarizes the relevant prefix already consumed. Therefore feeding chunks `a` and `b` must agree with feeding their concatenation, provided no reset intervenes and the stream ends at the same point. The capstone reports when a match is found and needs no finalization function; a line-buffering alternative may need EOF processing. The property applies to either design.
+The matcher's state summarizes the relevant prefix already consumed. Therefore feeding byte sequences `a` and `b` in separate calls must produce the same match events as feeding their concatenation, provided no reset intervenes, callbacks succeed, and the stream ends at the same point. The capstone reports as soon as a match is found and needs no finalization function. A line-buffering alternative may need EOF processing; include that step in both versions of the experiment.
 
-The capstone's C tests feed the same bytes at every two-part split and at many repeated chunk sizes. A separate Python oracle splits bounded test input into newline-delimited byte strings and performs direct membership checks. The oracle can use memory freely for small test cases even though the production tool must stream. Different structures make identical defects less likely than copying the production algorithm into its tests.
+Try a small investigation in which the fault is visible. This intentionally defective Python candidate counts chunks containing a pattern. It stands in for a design that mistakes read boundaries for report boundaries; it is not the capstone implementation. The oracle instead counts matching lines in the complete, small input. Predict which rows disagree before running:
+
+```sh
+python3 - <<'PY'
+pattern = b"needle"
+cases = [
+    ("one chunk", [b"needle\n"]),
+    ("split match", [b"nee", b"dle\n"]),
+    ("split after match", [b"needle", b"\n"]),
+    ("no final newline", [b"needle"]),
+    ("same line twice", [b"needle", b"needle\n"]),
+]
+for name, chunks in cases:
+    observed = sum(pattern in chunk for chunk in chunks)
+    expected = sum(pattern in line
+                   for line in b"".join(chunks).split(b"\n"))
+    print(f"{name}: observed={observed} expected={expected}")
+PY
+```
+
+The lists supply the exact chunks to the candidate, so process scheduling cannot change this experiment's boundaries. The first three rows hold the logical input fixed. The fourth changes only the final newline; the fifth introduces a second occurrence on the same line. Each change challenges a different part of the reporting rule.
+
+<details>
+<summary>Review the controlled investigation</summary>
+
+
+Every expected count is 1. The candidate reports 0 for `split match`, 2 for `same line twice`, and 1 for the other rows. The first mismatch supports the lost-prefix hypothesis. The second reveals a separate missing fact: whether the current line has already been reported. Passing the unterminated-line case gives no reason to change EOF handling for this candidate.
+
+A repair that preserves partial matches can fix the first defect while leaving duplicate reports. Keep both cases. After restoring cross-chunk matching, suppressing every report after the first could pass this small collection but fail an input containing matches on two different lines. Add that counterexample before accepting the repair. A test collection grows from the promises a repair could accidentally violate, not simply from the number of cases already passing.
+
+
+</details>
+
+The capstone's C tests feed the same bytes at every two-part split and at many repeated chunk sizes. This tests a relation between executions: changing how bytes are grouped must leave the reports unchanged. A separate Python **oracle**, a simple implementation of the expected result, splits bounded test input into newline-delimited byte strings and performs direct membership checks. The oracle can use memory freely for small test cases even though the production tool must stream. Its different structure reduces the chance of reproducing the production algorithm's defect in the test.
 
 Neither approach proves every input. Exhaustive splits are exhaustive only for the selected byte strings. Fixed-seed random inputs add variety and reproducibility; deliberately chosen cases still need to exercise empty input, embedded zero bytes, long lines, overlapping prefixes, and finalization. A thousand random strings may never put a match across the boundary you care about.
 
@@ -3169,6 +3704,7 @@ Its separate `build-sanitize/` directory prevents ordinary objects from being mi
 For unsynchronized thread access, use a separate ThreadSanitizer build when your platform and runtime support it:
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -g -O1 \
   -fsanitize=thread -pthread examples/threads.c -o build/threads-tsan
 ./build/threads-tsan
@@ -3181,6 +3717,7 @@ Do not combine that command with AddressSanitizer. A clean execution is evidence
 If the remaining question concerns matcher state, stop where input is processed. Build an unoptimized copy for easier source-level inspection:
 
 ```sh
+mkdir -p build
 cc -std=c17 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -g -O0 \
   capstone/sift.c capstone/matcher.c -o build/sift-debug
 printf 'before\nneedle\nafter\n' > debug-input.txt
@@ -3199,7 +3736,7 @@ continue
 quit
 ```
 
-These commands inspect state and the call path. Linux users preferring GDB can use `break matcher_feed`, `run`, `info locals`, `backtrace`, `next`, and `continue`. Consult the [LLDB tutorial](https://lldb.llvm.org/use/tutorial.html) for its interface.
+At function entry, inspect the arguments: `length` tells you how many input bytes this call may consume, and `m` points to the persistent state. Use `frame variable *m` to inspect that state, then step through the transitions of interest. These commands are a starting point, not a script that automatically locates the defect. Linux users preferring GDB can use `break matcher_feed`, `run`, `info locals`, `print *m`, `backtrace`, `next`, and `continue`. Consult the [LLDB tutorial](https://lldb.llvm.org/use/tutorial.html) for its interface.
 
 State your expected value before inspecting it. If the partial-match length should be three after `nee`, an observed zero narrows the fault to a transition already passed. Watching arbitrary variables until something looks surprising provides weaker guidance.
 
@@ -3233,9 +3770,18 @@ time ./build/sift needle measure-input.txt > /dev/null
 
 This no-match search should exit with status 1. It is a completed search, not a failure. Whole-process elapsed time includes startup and I/O; it does not isolate the matcher. Later runs may encounter cached file data. Do not call them storage-throughput measurements without controlling the storage and cache conditions.
 
-Use the same compiler options and identical inputs when comparing variants. Alternate or randomize the order of baseline and candidate runs so background drift is less likely to favor one consistently. Record all repetitions, not only the best. Record the machine, revision, compiler, options, input, timing boundary, and observed spread. No universal throughput number follows from this experiment.
+Use the same compiler options and identical inputs when comparing variants. Alternate or randomize the order of baseline and candidate runs so background drift is less likely to favor one consistently. Record all repetitions, not only the best. Keep correctness and timing in the same record:
 
-For an internal elapsed interval, use compatible readings of a monotonic clock. Wall-clock corrections are not work performed by your algorithm. Clock resolution and timestamp-call overhead still matter for short intervals. [Clock semantics](https://man7.org/linux/man-pages/man2/clock_gettime.2.html)
+| Record | Why it is needed |
+| --- | --- |
+| Revision, compiler, options, and actual buffer size | Identifies the implementation being compared |
+| Input identity, size, and match distribution | Identifies the work requested |
+| Output comparison and exit status | Establishes that the intended work completed |
+| Timing boundary, run order, machine, and all elapsed times | Makes variation and environmental differences visible |
+
+Report the observed spread as well as a typical time. No universal throughput number follows from this experiment.
+
+For an internal elapsed interval, take the start and end readings from the same monotonic clock. Subtracting wall-clock timestamps can mix clock corrections with the time spent doing work. Clock resolution and timestamp-call overhead still matter for short intervals. [Clock semantics](https://man7.org/linux/man-pages/man2/clock_gettime.2.html)
 
 ## Check whether the measured work still exists
 
@@ -3283,7 +3829,7 @@ To investigate a model-backed service, keep two questions separate: did the syst
 
 # Chapter 13 — Build and finish a streaming search tool
 
-You need to find which lines of an input contain a literal pattern. The input can exceed memory; a single line can also exceed memory. Bytes may arrive in arbitrary groups, including a group ending halfway through the pattern. A caller needs a useful result even when a later file cannot be read, and a reliable indication that some work failed.
+You need to find which lines of an input contain a literal pattern: an exact sequence of bytes, with no regular-expression syntax. The input can exceed memory; a single line can also exceed memory. Bytes may arrive in arbitrary groups, including a group ending halfway through the pattern. A caller needs the matches found before a later file fails, together with a reliable indication that the search was incomplete.
 
 These constraints do not yet name an algorithm. Start by identifying information that a future decision needs. If a read ends with `nee` while the pattern is `needle`, forgetting that suffix makes the next `dle` indistinguishable from an unrelated beginning. Some information must survive the read. Whether you retain bytes, candidate positions, or a compact state is a design choice to investigate.
 
@@ -3308,7 +3854,7 @@ Suppose the initial design says, “Allocate a growing buffer for each line, the
 
 Change the promise to printing every matching line in full, with no bytes from nonmatching lines in the output. Now consider a nonseekable stream whose enormous first line has its only match near the end. Until that match appears, the program cannot know whether to emit the earlier bytes. Once it appears, it must reproduce them. A single pass therefore needs some way to retain an arbitrarily long prefix in the worst case. A more clever growth factor cannot remove that information requirement.
 
-Possible revisions include a line-length limit, temporary-file storage, or rereading a stable seekable input. Each changes a resource or input assumption. Reporting line numbers removes the retention requirement only because it is the agreed output contract. Write down that agreement before celebrating the smaller buffer: removing necessary output would solve a different problem.
+Possible revisions include a line-length limit, temporary-file storage, or rereading a stable seekable input. Each changes a resource or input assumption. Reporting line numbers removes the retention requirement only because it is the agreed output contract. The smaller buffer is justified by the information the caller needs, not by silently dropping part of the requested output.
 
 ## Define the command before the algorithm
 
@@ -3328,7 +3874,7 @@ Each matching line produces one output record:
 label:line-number
 ```
 
-Line numbers start at 1. A newline byte ends a line. Carriage return is an ordinary byte, so CRLF input includes a carriage return just before each newline. A final line needs no newline to be searched. The program reports a line once even if the pattern occurs several times within it.
+Line numbers start at 1 for each input. A newline byte ends a line. Carriage return is an ordinary byte, so CRLF input includes a carriage return just before each newline. A final line needs no newline to be searched. The program reports a line as soon as its first match is found, without waiting for a newline or EOF. Empty input and empty lines cannot match a nonempty pattern.
 
 Labels are escaped byte by byte. A colon, backslash, control byte, or non-ASCII byte appears as `\xHH`. This keeps filenames containing colons or newlines from changing the output structure. It is a display format, not a Unicode-aware filename presentation. Standard input uses the fixed label `(stdin)`.
 
@@ -3386,9 +3932,20 @@ Compare three useful candidates. Let `M` be pattern length and `L` the longest l
 
 The suffix-window design is a legitimate solution to the memory requirement. We choose the third because it also gives a useful bound on matching work. Memory constraints motivate persistent state; the additional cost goal motivates how that state is represented.
 
-At a byte-processing boundary before reporting a line, `matched` records the length of the **longest** pattern prefix that is also a suffix of the bytes examined on that line. For pattern `needle`, after input `xnee`, that length is 3. The next byte `d` increases it to 4. A mismatch may reduce it; a read boundary does not change it. This statement is the state invariant to preserve, not merely an interpretation of a variable name.
+Before a line has been reported, `matched` records the length of the **longest** pattern prefix that is also a suffix of the bytes examined on that line. For pattern `needle`, input `xnee` leaves `matched == 3`: the suffix `nee` is a possible beginning of the pattern. The next byte `d` increases it to 4. A mismatch may reduce it; returning from one read and beginning another leaves it unchanged. Each byte-processing transition must preserve this invariant.
 
-The matcher also needs the current line number and a Boolean saying whether that line has already been reported. Once a line is reported, further bytes on that line require only newline detection. A newline resets the prefix state and the reported flag, then advances the line counter. This deliberate reset prevents a pattern from spanning two lines.
+The matcher also needs the current line number and a Boolean saying whether that line has already been reported. These three values summarize the input history relevant to the next report:
+
+| Event | Required transition |
+| --- | --- |
+| Non-newline byte on an unreported line | Update the longest matching prefix; report if it becomes a complete match |
+| Non-newline byte on an already reported line | Skip matching; this line needs no second report |
+| Newline | Advance the checked line counter; clear prefix progress and the reported flag |
+| End of a read | Preserve all three values for the next chunk |
+| EOF | Finish this input; no delayed match report is needed |
+| Start of another input | Reset to line 1, no matched prefix, and no report |
+
+The newline reset is justified by the ban on newline bytes in a pattern. Without that restriction, the reset could discard a valid match crossing a line boundary.
 
 The line counter uses `uintmax_t`. It is large, but it is still finite. The implementation rejects an increment that would overflow. Size limits are part of the contract even when reaching them would be impractical in an ordinary session.
 
@@ -3404,21 +3961,57 @@ pattern byte:  a b a b a c
 prefix length: 0 0 1 2 3 0
 ```
 
-Each table entry is the length of the longest proper prefix that is also a suffix of the pattern through that position. “Proper” means shorter than the whole sequence under consideration. If `k` bytes matched and the next byte disagrees, the next viable shorter candidate must itself be a suffix of those `k` bytes. It must also be a prefix of the pattern. That is precisely the relation the table records. Repeating the fallback considers progressively shorter candidates without rereading old input.
+Each table entry describes the pattern prefix ending at that position: it gives the length of the longest shorter prefix that is also its suffix. For `ababa`, that shorter prefix and suffix is `aba`, of length 3. Such a shorter prefix is called a **proper prefix**. On a mismatch with `k > 0` bytes already matched, entry `k - 1` identifies the longest shorter candidate. It must be both a suffix of the bytes already matched and a prefix of the pattern. Repeating this lookup considers progressively shorter candidates without rereading old input.
+
+We can derive the table instead of accepting it as an input. For each growing pattern prefix, look for its longest proper prefix that also appears at the end:
+
+| Prefix considered | Longest matching proper prefix and suffix | Table entry |
+| --- | --- | --- |
+| `a` | Empty | 0 |
+| `ab` | Empty | 0 |
+| `aba` | `a` | 1 |
+| `abab` | `ab` | 2 |
+| `ababa` | `aba` | 3 |
+| `ababac` | Empty | 0 |
+
+The constructor avoids searching every possible suffix afresh. For index `i >= 1`, start with `k = prefix[i - 1]`. Those `k` bytes already match at both ends of the previous prefix. If the new byte equals `pattern[k]`, the match extends by one. On a mismatch with `k > 0`, `prefix[k - 1]` names the next shorter candidate, using an entry already computed.
+
+For the final `c`, start at `k == 3`: the next expected byte is `pattern[3]`, or `b`. That fails. Fall back to `prefix[2] == 1`; `pattern[1]` is also `b`. Fall back again to `prefix[0] == 0`; `c` does not match `pattern[0]`, or `a`. Store zero. The constructor and the input scanner reuse the same relationship between prefixes and suffixes.
+
+Predict the final entry if the pattern is `ababaa` instead. Does reaching candidate length zero always force the entry to zero?
+
+<details>
+<summary>Review the table construction</summary>
+
+
+The final entry is 1. The incoming `a` still causes the fallbacks from 3 to 1 to 0, but now it matches `pattern[0]`, creating a one-byte prefix. Zero is the length before comparing this byte, not an instruction to discard it. The full table is `0, 0, 1, 2, 3, 1`.
+
+
+</details>
 
 The argument explains why simply setting `matched` to zero on every mismatch is incomplete: a nonempty suffix may remain a valid beginning. It also explains why subtracting one is insufficient as a complete rule: not every shorter suffix is a pattern prefix. You could check those suffixes directly, but precomputing their relationships avoids repeating that work.
 
-Trace the mismatch above. With five bytes matched, consult table entry 4 and keep three. The incoming `b` agrees with pattern position 3, bringing the matched length to four. The remaining input is `a,b,a,c`: the first `a` brings the length to five, the next `b` requires the same fallback and leaves four, and the final `a,c` bring it to five and then six. No previous input bytes need to remain in memory.
+Trace the mismatch above. The first five input bytes, `ababa`, leave five bytes matched. Continue with:
+
+| Input index | Incoming byte | Matched length before | Action | Matched length after |
+| --- | --- | --- | --- | --- |
+| 5 | `b` | 5 | Fall back using entry 4 to length 3; compare the same `b` again | 4 |
+| 6 | `a` | 4 | Extend the prefix | 5 |
+| 7 | `b` | 5 | Fall back to 3; compare the same `b` again | 4 |
+| 8 | `a` | 4 | Extend the prefix | 5 |
+| 9 | `c` | 5 | Complete the pattern and report line 1 | 6, then reset to 0 |
+
+Fallback changes the candidate prefix without consuming the incoming byte. Advancing to the next input byte during fallback would lose a possible match. The matching occurrence occupies indices 4 through 9; no earlier input bytes need to remain in memory. For the earlier input `ababababac\nno match\nababac`, the reports are lines 1 and 3 under either proposed read division.
 
 This is the central idea of the Knuth–Morris–Pratt family of string-matching algorithms. The useful property is that total matching work grows linearly with input length plus pattern length: each input step increases the matched length by at most one, and fallback steps reduce progress previously accumulated. Account for both increases and decreases across the whole input rather than multiplying a worst-looking inner loop by every byte. The table has one entry per pattern byte; its construction admits the same style of accounting.
 
 This bound concerns matching, not all costs of running the command. Formatting and writing each label also takes work, and an output operation can wait on an external consumer. An algorithmic bound does not establish a wall-clock deadline.
 
-Together, the pattern copy, prefix table, fixed 8192-byte input buffer, and small state use memory proportional to the pattern length. A line can be enormous without requiring a line-sized allocation. Output volume still has a cost; reporting millions of short matching lines is different work from finding one match on a huge line.
+For a pattern of `M` bytes, the matcher allocates `M` bytes for its copy and `M * sizeof(size_t)` bytes for the prefix table, plus one fixed-size state object. The application adds an 8192-byte input buffer and bounded stdio storage. These costs are independent of the input and line lengths. Output volume still has a cost; reporting millions of short matching lines is different work from finding one match on a huge line.
 
 ## Separate matching from operating-system work
 
-The matcher never opens files or writes to standard output. It calls an application-supplied function when it finds a matching line. This separates a deterministic state machine from operations that can block or fail for external reasons.
+The matcher never opens files or writes to standard output. It calls an application-supplied callback when it finds a matching line. The same matching logic can therefore report line numbers, count matches, or record test events. The callback owns the output behavior and can block or fail, so its contract is part of the matcher's progress argument.
 
 The application creates one matcher, feeds it bytes, resets it between inputs, and destroys it once. The matcher copies the pattern, so it owns that memory independently of the caller. Input buffers are borrowed only during `matcher_feed` and must remain unchanged until it returns. A callback receives the line number by value and a caller-owned context pointer. It must not feed, reset, or destroy the active matcher: same-thread callback reentry can invalidate state or lifetime even without a thread data race. Calls on a different matcher are allowed.
 
@@ -3432,9 +4025,22 @@ search_fd borrows matcher + descriptor
 main closes owned input descriptors and destroys matcher
 ```
 
-The public header expresses the contracts that a caller needs. The structure definition stays private in `matcher.c`, allowing the representation to change without changing callers. After a callback or feed error, callers must reset or destroy the matcher; the API does not promise resumability after failure.
+The public header expresses the contracts that a caller needs. The structure definition stays private in `matcher.c`, allowing the representation to change without changing callers. After a feed or callback error, callers must reset or destroy the matcher. Resetting starts a new input; it does not resume the failed feed or undo output already accepted by the callback.
 
-Before opening the interface, write down which failure leaves a resumable operation and which failure ends it. This reference chooses a simple rule: reset or destroy after a feed or callback failure. It does not attempt to undo output already accepted by the callback.
+Trace pattern `aba` through three feeds: `ab`, then `aaba\nab`, then `a`. Predict each callback's line number and the state left after the second feed. Assume callbacks succeed, then reconsider a failure at the first callback.
+
+<details>
+<summary>Review the line and callback trace</summary>
+
+
+The first feed leaves two bytes matched on line 1. The first byte of the second feed completes `aba` and reports line 1. Its remaining `aba` is skipped because that line is already reported. The newline resets reporting and matching; the final `ab` leaves two bytes matched on line 2. The third feed reports line 2 immediately. EOF adds no report.
+
+If the first callback fails, the second feed stops before processing its remaining `aba\nab`. The API returns failure without a consumed-byte count, and the callback may have produced partial output. Feeding the same chunk again cannot safely resume the operation. The reset-or-destroy rule gives callers a defined response to that uncertainty.
+
+
+</details>
+
+Before opening the interface, explain what a caller would need to know to resume after an output pause: which input bytes were consumed and whether the current match was accepted. The reference API does not report that progress. Appendix E's callback exercise asks you to design the stronger contract.
 
 <details>
 <summary>Reference interface — capstone/matcher.h</summary>
@@ -3475,11 +4081,11 @@ int matcher_feed(struct matcher *m, const unsigned char *data, size_t length,
 
 ## Implement the state machine
 
-The constructor validates the pattern before allocation. It checks each allocation immediately and preserves `errno` before cleanup. Successful library calls are not a safe place to keep a previous error code. Destruction accepts a null pointer, making constructor cleanup simple. The structure assignment from `(struct matcher){0}` establishes null pointer members explicitly through C initialization rules; zero-filled allocation alone is not a portable promise of null pointer representations. [C committee draft, initialization and `calloc`](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf).
+The constructor validates the pattern before allocation, including checking that `n * sizeof(size_t)` cannot overflow. It checks each allocation immediately and preserves `errno` before cleanup, because cleanup may change it. Destruction accepts a null pointer, making constructor cleanup simple. The structure assignment from `(struct matcher){0}` initializes pointer members to null pointers through C's initialization rules; the all-zero bytes supplied by `calloc` alone do not guarantee that pointer value on every C implementation. See sections 6.7.9 and 7.22.3.2 of the [C committee draft](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf).
 
 The implementation stores pattern bytes without a terminating zero because every access is bounded by the recorded length. Its representation is a byte sequence, not a C string. Only the constructor accepts the caller's C-string representation.
 
-Read the following source with the invariant beside you: outside a complete-match event, `matched` is smaller than the pattern length. When the lengths become equal, the code reports the line and resets `matched` before processing another byte. That prevents the next comparison from indexing beyond the pattern.
+Read the following source with the invariant beside you: before each pattern comparison, `matched` is smaller than the pattern length. When the lengths become equal, the code marks the line reported and resets `matched` before invoking the callback. The next comparison therefore cannot index beyond the pattern. If the callback fails, those state changes have already happened; the caller must reset or destroy the matcher, as the interface requires.
 
 <details>
 <summary>Reference implementation — capstone/matcher.c</summary>
@@ -3753,7 +4359,7 @@ The command has additional dependencies: blocking reads need input or EOF, and b
 
 Run `make test`. The matcher-specific C test forces different chunk boundaries in the same data. The Python suite compares whole-program results with an independent byte-string oracle. It places matches around the 8192-byte input-buffer capacity, although pipe delivery does not force a particular read division. It also checks embedded zero bytes, long lines, the maximum pattern length, invalid patterns, input errors, escaped filenames, standard input, and broken output.
 
-The tests do not make every failure physically happen. They do not exhaust available memory, simulate every filesystem, or prove the absence of races in an unrelated program. Their value comes from the connection between each case and a promised behavior. Read `tests/test_matcher.c` and `tests/check.py` as an executable companion to the contract.
+The tests connect specific cases to promised behavior; they do not exercise every resource failure. Allocation failure and line-counter overflow, for example, need controlled fault injection or a test seam to reach reliably. Read `tests/test_matcher.c` and `tests/check.py` as an executable companion to the contract, and identify which claims are tested directly and which still rely on inspection and reasoning.
 
 The program is deliberately sequential. Input files can change while being read, so results describe the bytes observed rather than a coherent filesystem snapshot. Blocking input may wait indefinitely for more data. It has no recursive directory walk, regular expressions, Unicode case folding, or parallel execution. Those are specific possible extensions, each with design work of its own.
 
@@ -3811,38 +4417,41 @@ Use this reference when reading a function or reviewing an error path. For each 
 
 The positive-size `realloc` rule is especially useful: an allocation failure can leave a fully usable old object. Design the caller's state update around that guarantee. [POSIX `realloc` specification](https://man7.org/linux/man-pages/man3/realloc.3p.html)
 
-A retry policy belongs to an operation, not to a universal error-handling macro. A positive I/O result records progress; an interrupted call may require another attempt; `EAGAIN` in nonblocking code means wait for another opportunity. A failed `close` needs the platform-aware policy discussed in Chapter 3. After reporting failure, ask whether the remaining cleanup can block on a resource the program still owns.
+A retry policy belongs to an operation. A positive I/O result records progress; an interrupted call may require another attempt; `EAGAIN` in nonblocking code means wait for another opportunity. A failed `close` needs the platform-aware policy discussed in Chapter 3. One retry macro cannot safely express all of these contracts.
+
+Review cleanup with the same care as the main path: save the error you intend to report before cleanup can replace it; release only resources still owned; and check whether a remaining wait depends on something this process must close or wake. Chapter 6's parent-held pipe writer is a concrete example of cleanup that can prevent progress.
 
 # Appendix B — Your revision workbook
 
 This draft becomes your book when its explanations reflect predictions you made, observations you recorded, and corrections you can defend. Begin with the opening reasoning method. Attempt the chapter's design question before opening its reference implementation, then compare the assumptions and tradeoffs behind the two designs.
 
-`WORKBOOK.md` contains an editable session template and is not regenerated by the book builder. The shorter version below fits a single notebook page. Its empty fields are intentional prompts for your own writing:
+`WORKBOOK.md` contains the full editable session template and is not regenerated by the book builder. For a short session, use this compact version. Expand the cost and ownership arguments when the problem needs them:
 
 ```text
-Chapter and working title:
-Observable goal, failure behavior, and limits:
-Inherited requirement or mechanism worth questioning:
-External contracts with source and version:
-Model assumptions and consequences if false:
-Unavoidable work or storage, with units and assumptions:
-Work I could remove, and the promise that permits or forbids it:
-Candidate designs and tradeoffs:
-Necessary state, owners, and borrowed lifetimes:
-Invariant and preservation argument:
-Progress argument and environment assumptions:
-Prediction before running the experiment:
-Exact command and smallest useful input:
-Observed output, status, and timing if relevant:
-Counterexample or competing explanation:
-Correction and evidence for it:
-What changes when one assumption changes:
-Review outcome and weakest remaining premise:
-My chapter explaining the derivation:
-Assistance used and remaining uncertainty:
+Chapter and observable goal, including failure and resource limits:
+Contracts (source/version), assumptions, and consequences if false:
+Two candidate designs; work each requires or could remove:
+Necessary state, owners, borrowed lifetimes, and cost bounds:
+Invariant and why each transition preserves it:
+What permits progress, including shutdown:
+Prediction and a counterexample or competing explanation:
+Command, input, environment, and observed result:
+Correction and the evidence supporting it:
+Changed assumption and the conclusion it changes:
+Review result, assistance used, and remaining uncertainty:
+My explanation of the design:
 ```
 
-For example, suppose your first pipe model predicts EOF when the producer exits. A parent that retains a write reference supplies a counterexample. After checking the pipe contract and tracing every reference, revise the claim: “The consumer reaches EOF after buffered bytes are consumed and every write reference is closed.” Your page should preserve the first prediction, explain why it failed, and derive a closure rule that covers both success and startup failure. The correction is evidence of reasoning progress, not something to erase from the record.
+For example, suppose your first pipe model predicts EOF when the producer exits:
+
+| Notebook entry | Evidence or revision |
+| --- | --- |
+| Prediction | The consumer finishes after the producer exits. |
+| Counterexample | The parent retains a write reference; the consumer keeps waiting after draining the data. |
+| Revised rule | The consumer reaches EOF only after buffered bytes are consumed and every write reference is closed. |
+| Next check | Trace and close every unused reference on both successful startup and partial startup failure. |
+
+Keep the failed prediction beside the correction so the reason for the new rule remains visible.
 
 For every revision, keep three kinds of evidence distinct: what the interface promises, what this implementation assumes, and what your experiment actually observed. Record the operating system, compiler version, build flags, and relevant input sizes. When results differ across machines, preserve both observations before deciding which explanation needs changing.
 
@@ -3902,10 +4511,15 @@ For **Clang and LLVM tools**, consult the [Clang user's manual](https://clang.ll
 | Lifetime | Interval during which an object or resource remains valid for its permitted uses. |
 | File descriptor | Process-local integer identifying a reference to an open resource. |
 | Open file description | Kernel state behind descriptors, including a regular file's current offset. |
+| System call | A request by a program for a kernel service, usually reached through a library interface. |
+| Virtual address | An address interpreted within a process's address space; its numeric value does not identify a physical-memory location by itself. |
 | EOF | The end-of-input condition defined by the particular stream or interface. |
 | Partial I/O | Successful transfer of fewer bytes than requested. |
+| Framing | A protocol's rule for finding message boundaries within a byte stream. |
 | Invariant | A property the design preserves at specified boundaries. |
 | Data race | Conflicting unsynchronized accesses by threads, at least one a write, involving non-atomic data. |
+| Race condition | A correctness failure caused by event ordering; it can occur even when individual memory accesses are synchronized. |
+| Deadlock | A state in which participants wait for progress that the waiting participants must enable. |
 | Undefined behavior | Behavior for which the C standard imposes no requirements. |
 | Readiness | A report that some I/O can proceed without waiting; it may indicate EOF or an error. |
 | Backpressure | A slow consumer causing an upstream producer to wait or limit queued work. |
@@ -3913,9 +4527,7 @@ For **Clang and LLVM tools**, consult the [Clang user's manual](https://clang.ll
 
 # Appendix D — Build toward demanding engineering roles
 
-The first thirteen chapters develop user-space systems programming through derivation, prediction, counterexamples, and reference implementations. Completing them is useful evidence of progress, but inspecting a supplied solution does not establish that you can design, implement, debug, and explain an unfamiliar system independently. Use the opening reasoning method to produce your own argument before comparing it with the reference.
-
-This appendix makes the learning standard more demanding. It identifies gaps in the current text, specifies substantial work to close them, and defines evidence you can collect. Appendix E gives an independent assessment you can start today. The advanced units below are a curriculum and project specifications; their complete implementations are not supplied. [Appendix F](#appendix-f--from-c-systems-to-ai-infrastructure) works through selected bridges from this foundation to AI infrastructure.
+The next step after the thirteen chapters is to build a system whose solution is not supplied. Choose a role family, attempt a relevant assessment in Appendix E, and use the result to select an advanced unit below. Each unit specifies a project and evidence of completion. [Appendix F](#appendix-f--from-c-systems-to-ai-infrastructure) supplies worked arguments for the AI infrastructure extensions.
 
 ## Calibrate the target
 
@@ -3948,7 +4560,7 @@ Choose one extension first. GPU programming and research mathematics belong wher
 
 ## What the current book does and does not establish
 
-The book teaches real resource-management issues. Its copier handles partial I/O, its process examples collect children, and its matcher handles arbitrary chunking. The revised chapters make you derive their state and challenge their assumptions before revealing code. The complete implementations still give substantial guidance; independent work must test whether you can transfer the reasoning to a larger problem.
+The copier handles partial I/O, the process examples collect child status, and the matcher handles arbitrary chunking. Each chapter asks you to derive the state and challenge its assumptions before revealing code. The table below identifies the additional work needed to apply those ideas independently at a larger scale.
 
 | Current material | What needs substantially more work |
 | --- | --- |
@@ -3964,13 +4576,13 @@ The book teaches real resource-management issues. Its copier handles partial I/O
 | A correctly functioning program | Deployment, actionable monitoring, compatibility, incident recovery, and rollback under ongoing traffic |
 | Exact byte-level results | Numerical tolerances, data leakage, statistical uncertainty, and evaluation validity for ML-oriented roles |
 
-Finding prose easy to follow and solving these harder problems are different observations. Start with the assessment before deciding how much of the foundation to skip. You may have mastered a topic, or you may recognize a good explanation without being able to construct it yet. Both are normal; they call for different next steps.
+Attempt the assessment before deciding which foundation chapters to skip. Following an explanation and constructing one independently exercise different skills.
 
 ## Use three forms of evidence
 
 For each major skill, collect a **working artifact**, a **reasoned explanation**, and an **independent demonstration**.
 
-A working artifact includes the implementation, build instructions, tests, and a precise contract. A reasoned explanation states ownership, invariants, failure behavior, and complexity or measured costs. An independent demonstration asks you to solve a variation without the reference implementation visible. These provide complementary evidence: code alone can hide misunderstandings, while an eloquent explanation can hide a lack of implementation practice.
+A working artifact includes the implementation, build instructions, tests, and contract. The explanation accounts for ownership, invariants, failure, and costs. The independent demonstration changes a requirement while the reference implementation is closed. Together they show what you can build, justify, and adapt.
 
 Use four progress labels:
 
@@ -4096,20 +4708,32 @@ Begin with Appendix E's shared core, E1–E6. Use its first task for one focused
 
 Proceed in three passes: first repair foundational gaps identified by the core assessment; next complete one language bridge and one Unit 8 project; then add a role-specific extension and repeat independent practice. Appendix F supplies intermediate worked examples between the chapters and those larger projects. An inference or research direction adds ML study at this stage; a backend direction can instead deepen distributed systems and operations.
 
+Use the failed contract or missing evidence to choose the next unit:
+
+| Gap exposed by the assessment | Study next | Evidence to bring back |
+| --- | --- | --- |
+| Task 1: ordering, duplicates, or hidden work | Unit 1: algorithms | A corrected invariant and a bound that counts examined input |
+| Task 2: ownership or incremental parsing | Chapters 2 and 10, then Unit 2 | A minimal failing input and a repair that preserves allocation-failure behavior |
+| Task 3: queue closure or worker lifetime | Unit 5: concurrency | Traces of blocked producers and consumers completing shutdown |
+| Task 4: stalled clients or unbounded output | Unit 6: services | A bounded service whose independent clients continue making progress |
+| Task 5: an unexplained timing difference | Units 3 and 7: machine behavior and measurement | A controlled experiment that distinguishes proposed causes |
+| Task 6: a changed callback or ownership API | Unit 2 and the relevant capstone reasoning | A caller that correctly resumes paused work or transfers ownership |
+| Tasks 7–9: retries, scheduling, or evaluation | Appendix F, then Unit 8 | A deterministic trace with complete resource and outcome accounting |
+
 Once the baseline is recorded, spend the largest share of study time on the weakest relevant fundamentals. Keep a smaller recurring block for independent coding and spoken explanation. If you already demonstrate a skill repeatedly, move forward rather than rereading familiar explanations for reassurance.
 
 Do not equate the eight-week introductory schedule in Appendix B with a deadline for this advanced stage. Decide the pace after learning your starting point, available weekly hours, target role, and application timeline. A short preparation window requires prioritization; it does not make all eight units fit by assertion.
 
-For every advanced unit, use the same derivation notebook as in the foundation: separate requirements and verified contracts from assumptions; compare plausible designs; state the necessary information, invariant, and progress conditions; and build a counterexample. Write your chapter from that record, retaining the mistake that led to the improved explanation. An external reviewer should be able to change one requirement and see you work out the consequences. That makes writing the book part of developing the engineering skill you want to demonstrate.
+Use the foundation's notebook for each advanced unit. Write the explanation from your actual predictions, failures, and corrections. Ask a reviewer to change one requirement and work through the consequences with you; that variation tests whether the argument transfers beyond the project you prepared.
 
 
 # Appendix E — An independent systems assessment
 
-These are original study exercises for developing skills relevant to demanding engineering roles at HRT, OpenAI, Anthropic, and other firms. They are not official company questions or predictions about an interview. They test skills the earlier chapters introduce without consistently requiring you to demonstrate independently. Completing them provides evidence for choosing your next work; it does not establish an offer probability.
+These original study exercises ask you to apply the earlier chapters without a supplied solution. Use them to find gaps and choose your next project when preparing for demanding engineering roles at HRT, OpenAI, Anthropic, or elsewhere. They are learning assessments, not official company questions or hiring predictions.
 
-Attempt each task from a blank implementation before opening related chapter solutions. Begin with a requirement statement, a ledger of contracts and assumptions, and two candidate designs. Derive the information and invariant your choice needs, then construct a counterexample before coding. Compiler diagnostics, debuggers, and primary documentation are allowed. Keep an assistance log: distinguish documentation lookup, a conceptual hint, code review, and a supplied solution. If you use an assistant, save your independent attempt first and label subsequent work as assisted.
+Attempt each task before opening related chapter solutions. Start from a blank implementation except in Task 2, where you repair the supplied code. State the requirements and assumptions, compare two designs, and write an invariant and counterexample before coding. Compiler diagnostics, debuggers, and primary documentation are allowed. Log any hints, review, or supplied code; save your independent attempt before accepting assistance.
 
-The timeboxes measure your present approach, not a hiring cutoff. Save the code and notes when time expires, then finish and repair them without the clock. Tasks 1–3 fit separate focused sessions. Tasks 4–5 are longer labs. Do not compress the assessment into one exhausting day.
+The timeboxes help you compare attempts. Save the code and notes when time expires, then finish and repair them without the clock. Tasks 1–3 and 6 begin with focused implementation attempts; Tasks 4–5 are longer labs. Tasks 7–9 extend the assessment to retries, scheduling, and evaluation; choose them when they match your target work. Spread the tasks across sessions.
 
 For each task, record four separate rubric results as **demonstrated**, **partial**, or **not yet demonstrated**. Explain each result with an artifact: code, failing input, test, trace, or measurement. A total score would hide important differences between correct implementation, explanation, and evidence. After the attempt, change one assumption and explain which part of the argument must change. The ability to do that matters even when the first implementation was successful.
 
@@ -4138,9 +4762,9 @@ Rubric:
 
 **First attempt: 60–75 minutes.** This intentionally flawed excerpt collects length-prefixed frames. Its bugs are not marked. Build your own harness and repair it without replacing the task with an unrelated implementation.
 
-The header is four bytes, most significant byte first. Bodies may contain any bytes and have lengths 0–4096. The callback borrows a complete body only during the call and cannot fail. Input chunks do not alias the buffer. A zero-length input may use a null pointer. Initialize `struct frames` to zero and eventually free its `data` field.
+The header is four bytes, most significant byte first. Bodies may contain any bytes and have lengths 0–4096. The callback borrows a complete body only during the call and cannot fail. It must not modify or free the parser or its buffers, feed the same parser recursively, or retain the body pointer after returning. Input chunks do not alias the buffer and remain unchanged during the call. A zero-length input may use a null pointer. Initialize `struct frames` to zero and eventually free its `data` field.
 
-Required behavior: emit complete frames exactly once, preserve incomplete input across calls, reject an oversized length as soon as its header is available, and preserve the previous buffer on allocation failure. Return zero for accepted input and minus one for an error. After malformed input, the caller may destroy the object. At EOF, remaining buffered bytes mean truncation.
+Required behavior: emit complete frames exactly once, preserve incomplete input across calls, reject an oversized length as soon as its header is available, and preserve the previous buffer on allocation failure. A failed allocation must consume none of the new chunk and emit no frames, so the caller may retry that chunk. Return zero for accepted input and minus one for an error. In the repaired version, set `errno` to `ENOMEM` for allocation failure, `EOVERFLOW` for an unrepresentable buffer size, and `EPROTO` for an oversized frame. This lets the caller distinguish retryable allocation failure from rejected input. Size overflow must also leave the previous state unchanged. After malformed input, require destruction or reinitialization before another feed. At EOF, remaining buffered bytes mean truncation.
 
 ```c
 #include <stddef.h>
@@ -4259,10 +4883,12 @@ A timeout may launch another attempt while the original still runs. Accept the f
 
 Use a deterministic event trace: launch attempt A, time out A, launch B, receive B's success, receive A's delayed success, receive B's duplicate success. The expected accepted-result count is one; both attempts may have done work. Change the arrival order, inject an identity conflict, and show the expected decisions before running the code.
 
+Declare finite limits for job records, attempts, payload bytes, and retained results. Retain identity and outcome records for the full run; reject a new job or refuse another attempt when its reservation cannot fit. A timed-out attempt that still runs retains its execution resources. These limits make the exercise implementable without assuming infinite deduplication storage.
+
 Rubric:
 
 - Identity checks distinguish resubmission from payload or version conflicts.
-- Attempt and logical-job states explain exactly which replies may be accepted.
+- Attempt and logical-job states explain exactly which replies may be accepted and which resources remain reserved.
 - Deterministic traces cover duplicates, reordered replies, unknown attempts, and repeated work.
 - The result guarantee states its lifetime and does not claim exactly-once execution or restart recovery.
 
@@ -4305,7 +4931,7 @@ Finish with a short revision of your own learning plan. Choose the weakest demon
 
 # Appendix F — From C systems to AI infrastructure
 
-A model service still owns buffers, accepts work, waits for resources, handles interrupted communication, and produces evidence about its behavior. The C chapters give you a way to reason about those obligations. The next step is to change the workload while keeping the discipline: define success, derive necessary state, challenge an assumption, and measure the remaining uncertainty.
+A model service owns buffers, accepts work, waits for resources, and handles interrupted communication. The C chapters supply the tools for reasoning about those obligations. Here the workload changes while the questions remain: what must be retained, what permits progress, and what does the evidence establish?
 
 This appendix develops three designs that connect Chapters 9–13 to AI infrastructure. They are worked arguments and lab specifications; the repository does not supply their implementations. Begin with deterministic simulated workers on your CPU. No paid API, model download, or accelerator is required. Appendix E Tasks 7–9 ask you to implement related contracts independently.
 
@@ -4313,7 +4939,7 @@ This appendix develops three designs that connect Chapters 9–13 to AI infrastr
 
 Suppose a service receives jobs containing an immutable input, a model version, and a deadline. A worker eventually returns a bounded result. Before choosing a thread count, answer a more basic question: what permits the service to accept another job?
 
-For this study design, acceptance means the service has validated the request and reserved its maximum accounted memory. A successful submission is distinct from successful computation. Rejection transfers no ownership. Accepted jobs eventually receive a terminal outcome if workers and the coordinator continue making progress; a deadline supplies a failure policy, not evidence that computation has stopped.
+For this study design, acceptance means the service has validated the request and reserved the maximum memory covered by its accounting model. Acceptance commits resources; it does not promise a successful computation. Rejection transfers no ownership. An accepted job eventually reaches a terminal outcome—success, failure, or cancellation—if workers and the coordinator continue making progress. Reporting deadline failure does not establish that the worker has stopped.
 
 Assume a 64 MiB accounting budget, including 16 MiB reserved for fixed state. Each accepted job reserves 6 MiB covering its bounded input, metadata, working storage, and retained output. Assume these bounds are enforced and no additional allocation escapes the ledger. Then:
 
@@ -4327,7 +4953,7 @@ This is a bound on the declared accounting model. It is not a measurement or gua
 
 Reserve before acceptance, under the same synchronization that changes the queue. Checking available space and updating it separately allows two submitters to spend the same capacity. Queued jobs retain reservations too. Otherwise eight running jobs plus an unbounded waiting list defeats the calculation.
 
-Keep the accounting rule attached to ownership: memory becomes available when no owner can still access it. A cancellation request can remove a queued job, but a running worker may still hold its input. Marking that job cancelled and immediately reusing its storage introduces a lifetime bug. Separate the reported outcome from acknowledgement that execution and buffer access have ended. Completed replies also retain capacity until delivered or disposed of according to policy.
+Release a reservation only when the resources it covers are no longer needed. A queued job can be removed before any worker owns its input, but a running worker may still access that input after cancellation is requested. Marking the job canceled and immediately reusing its storage introduces a lifetime bug. Track the reported outcome separately from acknowledgement that execution and buffer access have ended. Completed replies also retain capacity until delivered or disposed of according to policy.
 
 **Try a counterexample:** all eight slots are occupied when the oldest worker exceeds its deadline. A ninth request arrives. Under which event can its reservation succeed?
 
@@ -4336,6 +4962,18 @@ Keep the accounting rule attached to ownership: memory becomes available when no
 
 
 Deadline expiry alone releases nothing that the worker still owns. The ninth request must remain unaccepted or be rejected until enough ownership actually ends. If cancellation never stops the worker, reserved capacity can remain unavailable. A design that requires recovery from that condition needs an enforceable termination or isolation mechanism and a cleanup contract. Renaming the state does not supply one.
+
+For a concrete trace, suppose all eight jobs are executing. The service rejects new work when full and keeps no result cache after a job is fully disposed of:
+
+| Event | Live job reservations | Total reserved | Admission decision |
+| --- | --- | --- | --- |
+| Eight jobs are running | 8 | 64 MiB | Full |
+| One job expires; cancellation is requested | 8 | 64 MiB | Still full; its worker owns storage |
+| A ninth job arrives | 8 | 64 MiB | Reject it |
+| The expired worker stops and all of that job's resources are released | 7 | 58 MiB | One 6 MiB reservation is available |
+| A new submission reserves that capacity | 8 | 64 MiB | Accept it |
+
+If a reply or outcome record remains retained, its storage must stay in the ledger. The retry design below makes that additional lifetime explicit.
 
 
 </details>
@@ -4352,14 +4990,14 @@ T(b) = 4 ms + 2 ms * b, for batch sizes 1 through 4
 
 There is one worker, jobs have equal size, and all members receive their results at batch completion. Ignore transfer and scheduling overhead. These are invented simulation parameters, not CPU or GPU performance measurements. Four individual jobs cost 24 ms of worker service; one batch of four costs 12 ms. Under a continuously supplied backlog, the modeled service capacities are approximately 167 versus 333 jobs per second. Neither number predicts request latency.
 
-Now submit four jobs at simulated times 0, 3, 6, and 9 ms. Compare immediate single-job service with collecting four jobs, allowing at most 9 ms from the oldest queued arrival:
+Now submit four jobs at simulated times 0, 3, 6, and 9 ms. Compare immediate single-job service with collecting four jobs, allowing at most 9 ms from the oldest queued arrival. At a shared timestamp, enqueue arrivals before choosing the batch, so the arrival at 9 ms joins the batch dispatched then:
 
 | Policy | Completion times, in arrival order | Latencies from arrival | Mean latency |
 | --- | --- | --- | --- |
 | Single jobs | 6, 12, 18, 24 ms | 6, 9, 12, 15 ms | 10.5 ms |
 | One batch of four, starting at 9 ms | 21, 21, 21, 21 ms | 21, 18, 15, 12 ms | 16.5 ms |
 
-The batch uses less worker time and finishes the whole set earlier, while increasing mean latency. A 15 ms deadline from each arrival would also change which jobs succeed. State how equality at the deadline is treated before testing it. Batching is a tradeoff you can derive; a larger batch is not automatically a better service.
+The batch uses less worker time and finishes the whole set earlier, while increasing mean latency. Now require completion strictly before 15 ms has elapsed since each arrival: three jobs meet that deadline under single-job service, but only one does in the batch. Treating equality as success would change those counts to four and two. The deadline rule matters as much as the duration calculation.
 
 Give the scheduler a maximum batch size, a maximum wait measured from the oldest queued job, and absolute job deadlines. A new arrival must not reset the oldest job's wait. Before dispatch, expire queued work according to the contract and reserve any batch-specific workspace. In this toy model, workspace is already covered by the per-job reservations; another implementation must justify that assumption separately.
 
@@ -4392,9 +5030,38 @@ Use a bounded, single-coordinator study design whose guarantee lasts for that co
 
 Combining this design with the scheduler changes its budget: the earlier 6 MiB reservation assumed one execution per job. Reserve each overlapping attempt's workspace separately and retain that charge until it stops. Cached results and deduplication records remain charged after a reply is delivered; delivery does not end their ownership.
 
-If attempts may overlap, give every attempt a unique ID. Serialize the transition from unresolved to terminal. A successful attempt can commit only while the logical job remains unresolved. Later successes cannot overwrite it; their buffers still need cleanup. A retry limit or deadline may instead commit failure, after which a late success remains late. Decide that policy before an ambiguous history occurs.
+If attempts may overlap, give every attempt a unique ID. Serialize the transition from unresolved to terminal so two completions cannot both win. A successful attempt can commit only while the logical job remains unresolved. Later successes cannot overwrite the accepted result; their buffers still need cleanup. A retry limit or job deadline may instead commit failure, making later successes ineligible. Specify whether a timeout ends only an attempt or the whole logical job before implementing retries.
 
 The invariant is **at most one accepted result per logical job**, not exactly one execution. A deterministic worker makes repeated answers easy to compare, but determinism alone does not suppress repeated work. For a stochastic worker, the accepted answer may depend on which attempt wins. Pinning a model version and settings gives the request meaning without promising identical outputs.
+
+### Work through an overlapping retry
+
+Take one logical job J with matching, valid replies from attempts A and B. For this trace, an attempt timeout permits another dispatch but does not commit job failure or disqualify the earlier attempt. There is no job-deadline expiry. Completion here includes confirmation that the attempt has stopped using its execution buffers; receipt of a reply alone would need a separate ownership rule otherwise.
+
+| Event | Job's committed outcome | Attempts still executing | Required decision |
+| --- | --- | --- | --- |
+| Dispatch A | None | A | Reserve A's execution resources |
+| A exceeds its reply timeout | None | A | Keep A's reservation; timeout does not establish termination |
+| Dispatch B | None | A, B | Reserve B separately before dispatch |
+| B completes successfully | B's result | A | Commit once; release B's execution storage and retain the result |
+| A completes successfully | B's result | None | Discard A's redundant result and release A's execution storage |
+| A duplicate of B's reply arrives | B's result | None | Ignore the duplicate; do not release B's resources a second time |
+| The client retries J | B's result | None | Return the stored outcome without another result-acceptance event |
+
+The logical job and its attempts require separate state because their lifetimes diverge. After B wins, J has an answer while A still owns resources. After A stops, no attempts execute, yet the cached result and identity record still occupy storage. A single `done` flag cannot tell the coordinator which of these resources it may release.
+
+**Predict a variation:** A's success arrives just before B's success. Then consider a different policy in which J's absolute deadline commits failure before either success arrives. Which reply may win in each case, and what cleanup is still required?
+
+<details>
+<summary>Review competing terminal events</summary>
+
+
+Under the first policy, A may win even though its attempt timeout has elapsed. The timeout authorized another attempt; it did not invalidate A. B's later success is redundant. Reversing arrival order can therefore change the accepted result without violating the contract.
+
+Under the second policy, the committed deadline failure has already resolved J, so neither later success can replace it. Both attempts still require cleanup when their execution actually ends. Serializing the terminal transition chooses one outcome; it does not stop workers or release their buffers by itself.
+
+
+</details>
 
 **Exercise:** attempt A finishes, the coordinator commits its answer, the reply is lost, and the client resubmits. Then repeat the trace with the coordinator crashing immediately after the commit. Which retained fact makes the histories different?
 
@@ -4415,11 +5082,49 @@ A fast runner can still produce a misleading experiment. Begin with a manifest d
 
 Start with a deterministic baseline whose answers are independently checkable, such as the capstone's byte-pattern predicate compared with a simple whole-input oracle on bounded fixtures. This establishes runner behavior before adding model uncertainty. A file of canned successful replies cannot test timeout accounting or retry behavior. Add injected failures and preserve an outcome for every intended case.
 
-Suppose 100 cases are submitted. Ninety complete, of which 80 satisfy the scoring rule; ten time out. Then `80/90` is approximately 88.9% correctness among completed cases. If the declared end-to-end success rule requires a correct answer before timeout, `80/100` is 80% success over submissions. Report both denominators and the ten timeouts. Removing missing results silently changes the question. Do not invent completion latencies for timed-out cases; report their count and observation deadline separately from the distribution conditional on completion.
+Suppose 100 cases are submitted. Ninety complete before the deadline: 80 satisfy the scoring rule and ten do not. The other ten time out. These outcomes answer three different questions:
+
+| Metric | Calculation | What it describes |
+| --- | --- | --- |
+| Correctness among completed cases | 80 / 90, about 88.9% | Answer quality conditional on completion |
+| Completion rate | 90 / 100 = 90% | How much requested work returned an answer in time |
+| End-to-end success | 80 / 100 = 80% | Requested cases with a correct answer before the deadline |
+
+Report the counts with the denominators. Removing missing results changes the question. Do not invent completion latencies for timed-out cases; report their count and observation deadline separately from the latency distribution among completed cases.
+
+### Work through an apparently faster report
+
+Use a simulated workload of four requests dispatched together to four independent workers. Their fixed service durations are 10, 20, 100, and 200 ms; every computed answer is correct. The baseline waits for all four. A candidate runner uses the same workers but reports timeout at 50 ms and rejects later results. No worker computation has become faster.
+
+| Request | Worker finishes at | Baseline report | Candidate report |
+| --- | --- | --- | --- |
+| A | 10 ms | Correct at 10 ms | Correct at 10 ms |
+| B | 20 ms | Correct at 20 ms | Correct at 20 ms |
+| C | 100 ms | Correct at 100 ms | Timeout at 50 ms |
+| D | 200 ms | Correct at 200 ms | Timeout at 50 ms |
+
+The baseline's mean completed-request latency is `(10 + 20 + 100 + 200) / 4 = 82.5 ms`. The candidate's is `(10 + 20) / 2 = 15 ms`. That smaller average describes a different population: the candidate excludes both slow cases. Its end-to-end success has fallen from `4/4` to `2/4`. Among the two cases both runners complete, latency is unchanged.
+
+A 50 ms timeout may still serve a valid responsiveness requirement. Report that policy change and its consequences rather than attributing the lower conditional average to faster computation. If the workers continue after timeout, the candidate also retains their execution reservations until they stop, as in the admission example.
+
+**Predict before measuring:** how would a genuine worker speedup differ in a trace of these same four request IDs? Which timestamps and outcomes would you need to retain?
+
+<details>
+<summary>Review the comparison population</summary>
+
+
+Record submission, dispatch, execution end, reported outcome, and result-acceptance time where applicable. A faster execution would move a worker's end time earlier for the same work. Changing only the reporting deadline changes which outcomes qualify for the completed-request average. Keeping per-request records lets you distinguish the two, including cases where both changes occur together.
+
+For example, halving all four service durations produces 5, 10, 50, and 100 ms. With the rule that completion at the 50 ms deadline is too late, only the first two still succeed. A real speedup can coexist with unchanged success counts under this deadline, so report execution evidence as well as the aggregate outcome.
+
+
+</details>
+
+### Define what the comparison measures
 
 Distinguish test harness correctness from model quality. Exact byte equality can judge the parser fixture. It may not judge a task with multiple valid answers. Define the scoring rule before comparing candidates and inspect disagreements. If human judgment is needed, preserve the rubric and adjudication procedure. A larger aggregate score cannot explain whether changed behavior came from better answers, easier cases, or dropped failures.
 
-When a model or threshold is fitted, separate training, development, and final held-out evaluation data. Training changes parameters; development informs choices; final evaluation estimates behavior on examples withheld from those choices. Split related examples together when shared origins would leak information. Repeatedly selecting changes from the final set turns it into development data, whatever the filename says.
+When a model or threshold is fitted, separate training, development, and final held-out evaluation data. Training changes parameters; development informs choices; final evaluation estimates behavior on examples withheld from those choices. Keep related examples in the same split when their shared origin would leak information—for example, fragments from one source document should not quietly appear in both training and evaluation. Repeatedly selecting changes from the final set turns it into development data, whatever the filename says.
 
 **Exercise:** optimization lowers mean completed-job latency while doubling timeouts. Write two possible explanations and one trace that separates them. Then change the workload to longer inputs without changing the original report. Identify precisely which conclusions no longer have supporting evidence.
 
@@ -4427,7 +5132,7 @@ When a model or threshold is fitted, separate training, development, and final h
 
 For an ML-focused path, add Python and basic linear algebra after the deterministic service works. Learn array shapes, dtypes, indexing, exceptions, environments, and tests. Follow the official [PyTorch basics sequence](https://docs.pytorch.org/tutorials/beginner/basics/intro.html) for tensors, data loading, model construction, differentiation, and saved parameters. Keep the first model small enough to train and evaluate on the CPU.
 
-For example, generate two-dimensional points and label them by a documented linear rule. Use fixed, separate training, development, and evaluation manifests. A linear classifier can transform input shape `[batch, 2]` into two class scores per example, shape `[batch, 2]`. Labels have shape `[batch]`. Derive those dimensions before selecting a layer; a tensor that broadcasts successfully can still express the wrong calculation. The known label rule supplies an oracle for the generator, while a constant-class predictor supplies a simple quality baseline.
+For example, generate two-dimensional points and assign each to one of two classes using a documented linear rule. Use fixed, separate training, development, and evaluation manifests. A linear classifier maps inputs of shape `[batch, 2]` to two class scores per example, also `[batch, 2]`; the first 2 counts input features and the second counts output classes. Labels have shape `[batch]`. Derive those meanings before selecting a layer: matching dimensions or successful broadcasting do not establish the intended calculation. The known rule checks the generator, while a constant-class predictor provides a quality baseline.
 
 Training computes predictions and a loss, obtains gradients, and updates parameters. Gradients accumulate unless reset: explain where `optimizer.zero_grad()`, `loss.backward()`, and `optimizer.step()` belong in your loop. Inference uses the chosen parameters to produce predictions without a training update. [PyTorch's optimization tutorial](https://docs.pytorch.org/tutorials/beginner/basics/optimization_tutorial.html)
 

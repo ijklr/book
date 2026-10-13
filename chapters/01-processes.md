@@ -2,7 +2,7 @@
 
 A test harness launches the same executable twice. One invocation should succeed; the other should deliberately return a chosen failure status. A person wants a readable account of each run, while the harness needs a result it can interpret without reading English. Design a command for both callers.
 
-Call it `identity [STATUS]`. It should report its process and account identifiers, its argument list, and the requested status. It accepts at most one optional decimal status from 0 through 125. Invalid arguments produce a diagnostic and status 2. A detected output error takes precedence over the requested status and produces status 1. Otherwise the command returns the requested status, defaulting to zero. This is a small program with several observable promises, not simply a request to print some numbers.
+Call it `identity [STATUS]`. It reports its process and account identifiers, its argument list, and the requested status. It accepts at most one optional decimal status from 0 through 125. Invalid arguments produce a diagnostic and status 2. A detected output error takes precedence over the requested status and produces status 1. Otherwise the command returns the requested status, defaulting to zero. Even this small program needs a contract for input, output, and failure.
 
 ## Decide what the environment gives you
 
@@ -18,15 +18,19 @@ You cannot derive an operating-system interface from a preference for simple des
 
 A program describes computation. An executable file contains code and information needed to run it on a particular platform. A process is an instance with memory, execution state, and operating-system resources. Running one executable twice creates separate instances whose arguments and connections can differ. This distinction explains why recompiling is unnecessary to request a different exit status.
 
+In `main(int argc, char **argv)`, `argc` counts argument strings and `argv` points to their array. The arguments occupy indices below `argc`; `argv[argc]` is a null pointer, not another string to print. In our shell examples, `argv[0]` names the invocation and `argv[1]`, when present, holds the requested status. The startup contract appears in section 5.1.2.2.1 of the [WG14 C committee draft](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf).
+
 The kernel manages shared resources and enforces access between processes. Ordinary C code runs in user space. A library interface may enter the kernel, perform work locally, or combine both. Formatting an integer is library work; delivering the resulting characters eventually involves the operating system. One C function call does not imply one system call.
 
 ## Compare two interfaces before implementing either
 
-One plausible design prints `success` or `failure` and always exits zero. A human can read it, but the harness must now parse text. If a diagnostic changes language or wording, the harness can break. Worse, an output failure can erase the only result. This design does not satisfy our machine-readable completion requirement.
+One plausible design prints `success` or `failure` and always exits zero. A human can read it, but the harness must now parse text whose wording needs its own stable contract. An output failure can also erase the only reported result. Most directly, always exiting zero violates the promise to return the requested status. Text can form a machine-readable protocol, but it does not fulfill that particular promise.
 
 A second design returns a status and prints everything to the same output stream. That gives the harness a result, but a caller saving normal output also saves argument-error messages. A consumer expecting records must distinguish data from diagnostics.
 
-We choose three channels: normal records on standard output, diagnostics on standard error, and a bounded exit status for completion. That choice follows from our callers' needs; another application could legitimately choose a structured message protocol instead. Separating channels does not ensure that every message reaches a human. If the diagnostic destination fails too, the command has no additional guaranteed reporting channel.
+We choose three channels: normal reports on standard output, diagnostics on standard error, and a bounded exit status for completion. The report is for a person; it prints argument strings directly, so an argument containing a newline can span several lines. It is not an unambiguous serialization of the argument list. The harness uses the status instead of parsing this display.
+
+This contract deliberately allows overlapping meanings: status 1 can mean “the caller requested 1” or “output failed.” A harness that must distinguish those cases needs a revised status scheme or an additional structured result. Separating data from diagnostics also cannot guarantee delivery: if standard error fails, there is no further guaranteed reporting channel.
 
 The shell connects these channels before our code runs. Therefore argument validation cannot protect a preexisting file from a shell redirection that already truncated it. Keep responsibility with the component that performs the action.
 
@@ -36,9 +40,9 @@ Test the uncertain assumption with a small harness that discards normal output, 
 
 ## Derive the minimum state and error precedence
 
-The only persistent decision is the requested status. Parsing also needs a temporary result and evidence about which input characters were consumed. Process identifiers can be retrieved and printed without retaining a history of earlier runs. Keeping such a history would add state without serving this contract.
+The requested status must survive parsing so completion can return it. Parsing also needs a temporary result and evidence about which input characters were consumed. Process identifiers can be retrieved and printed without retaining a history of earlier runs. Keeping such a history would add state without serving this contract.
 
-Our control flow has three phases: validate, report, complete. The invariant before reporting is that the status is representable and within our chosen range. The invariant during argument output is that only entries below `argc` are accessed. Completion must select the strongest detected outcome: invalid syntax prevents reporting; a later detected output failure overrides an otherwise valid requested status.
+Our control flow has three phases: validate, report, complete. Before reporting, the status must be representable and within our chosen range. During argument output, each accessed index `i` must satisfy `0 <= i < argc`. These are invariants: properties that must hold at the relevant stage. Status selection follows the stated precedence: invalid arguments return 2 before normal reporting; a detected output failure returns 1; otherwise completion returns the requested status.
 
 Consider an apparently convenient conversion that maps unrecognized text to zero. Both `0` and `nonsense` could then lead to success. Information lost at conversion cannot be recovered by a later range check. We need separate evidence for whether conversion started, where it stopped, and whether its result was representable.
 
@@ -54,7 +58,7 @@ Then predict this sequence without running it: request status 7, run another suc
 
 `getpid` and `getppid` obtain the process and parent identifiers. These identifiers describe current process relationships, not permanent identities across time. The [process identification manual](https://man7.org/linux/man-pages/man2/getpid.2.html) documents those interfaces and Linux-specific details. `getuid` and `getgid` report real account identifiers, not a complete authorization model.
 
-The reference uses `strtol`. It checks a reported conversion error, an unchanged end pointer, trailing characters, and the accepted range. Its chosen grammar permits the leading whitespace and optional sign recognized by `strtol`, provided the numeric result is 0–125; it rejects trailing text, including trailing spaces. In particular, textual `-0` is accepted because its value is zero. A stricter decimal grammar would need explicit lexical validation.
+The reference uses `strtol` with base 10. It clears `errno` before conversion, then checks for a conversion error, an unchanged end pointer, trailing characters, and an out-of-range value. Its grammar permits leading whitespace and an optional sign, provided the numeric result is 0–125; it rejects trailing text, including trailing spaces. Thus `" +7"` and `"007"` request 7, `"7 "` is invalid, and `"-0"` requests zero. A stricter decimal grammar would need explicit lexical validation.
 
 Types such as `pid_t` and `uid_t` belong to the platform interface. Converting to `intmax_t` or `uintmax_t` and using the corresponding `j` format modifier gives the variadic print function the type it expects. A number that looks small does not justify passing the wrong argument type.
 
@@ -90,16 +94,48 @@ cc build/identity.o -o build/identity
 
 An object file can contain unresolved references. Linking connects references to definitions and produces an executable. A header supplies declarations; including `<stdio.h>` does not paste the implementation of `printf` into your source. Source portability also does not imply binary portability: compile separately for macOS and Linux.
 
-Now test the channel design using scratch paths:
+## Follow the shell, the program, and the observer
+
+The three result channels become easier to distinguish when you follow one invocation in order. Use scratch paths and assume the file operations below succeed:
 
 ```sh
-./build/identity 0 > build/identity.txt
+printf 'before\n' > build/identity.txt
+./build/identity 7 > build/identity.txt 2> build/identity.err
+saved_status=$?
+printf 'saved status=%s\n' "$saved_status"
 cat build/identity.txt
+printf 'status after cat=%s\n' "$?"
+```
+
+| Step | Component acting | Result |
+| --- | --- | --- |
+| Prepare redirections | Shell | Truncate `identity.txt`; open `identity.err` for diagnostics |
+| Validate `7` | `identity` | Retain the requested status; produce no diagnostic |
+| Format and flush the report | `identity` | Put the report in `identity.txt` |
+| Complete | `identity`, then shell | Return 7; make that status available through `$?` |
+| Save the status | Shell | Store 7 in `saved_status` before another command replaces `$?` |
+| Display the file | `cat` | Print the report and return its own status, normally 0 |
+
+The two printed status lines therefore contain 7 and 0. They describe different commands. The variable preserves the first value; `$?` is not a history of past results. The initial `before` line has disappeared because truncation happened before `identity` wrote anything. Neither the shell's redirection operators nor the output filenames become arguments to `identity`; the shell uses them to establish its connections. These rules belong to the [shell command language](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html).
+
+Now predict the same destinations after validation fails:
+
+```sh
 ./build/identity bad > build/identity.txt 2> build/identity.err
+saved_status=$?
+printf 'saved status=%s\n' "$saved_status"
 cat build/identity.err
 ```
 
-Record both the command's result and the resulting files. Do not infer a program's success solely from the absence of visible terminal output. Redirection has changed where evidence appears.
+Before running it, answer three questions. Does the earlier successful report remain in `identity.txt`? Which command actually makes the diagnostic visible on the terminal? Would an empty `identity.err` alone establish that the requested status was zero?
+
+:::reveal Review the channel trace
+
+The failed invocation leaves `identity.txt` empty: the shell has already truncated it, and argument validation returns before normal reporting. `identity` writes the diagnostic into `identity.err`; the later `cat` copies it onto the terminal. The saved status is 2 even if `cat` subsequently returns zero.
+
+An empty diagnostic file establishes neither a zero status nor successful completion. In the first run it accompanies the deliberately requested status 7. Inspect the channel that actually carries the fact you need. A complete report and a nonzero status are compatible under this command's contract.
+
+:::
 
 ## Exercises and a changed requirement
 

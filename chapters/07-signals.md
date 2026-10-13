@@ -2,7 +2,7 @@
 
 Imagine a small service that owns an output file. A controller must be able to ask it to stop, let it finish its cleanup, and collect its result. The request may arrive while the service is between ordinary instructions. We want a protocol that preserves the request until the service can act on it, without forcing cleanup to run inside an arbitrary interrupted operation.
 
-For the first experiment, remove useful work and the output file. Keep only startup, a stop request, and normal termination. Simplifying the payload lets us investigate the synchronization problem directly. The eventual service can add resources after this ordering is understood.
+For the first experiment, leave out the service's work and output file. Keep only startup, a stop request, and normal termination. This isolates the synchronization problem. We can add resources after understanding when the request becomes safe to send and how the receiver remembers it.
 
 The requirement is an orderly response to a supported request after announced readiness. It is not a promise to recover from every possible process termination. Establishing that boundary is part of the design, before choosing a signal number or handler.
 
@@ -16,7 +16,7 @@ initializing --> ready --> stop accepted --> cleaning up --> finished
           controller may send now
 ```
 
-The controller needs evidence that the receiver has installed its policy. The receiver needs the request to remain observable if it arrives just before waiting. Because stopping is an idempotent decision, a boolean “stop requested” is enough information; ten stop requests need not produce ten separate cleanups.
+The controller needs evidence that the receiver is prepared to handle the request. The receiver must remember a request that arrives just before it starts waiting. Stopping is **idempotent**: repeating the request has the same intended effect as making it once. A boolean “stop requested” therefore carries enough information; ten requests need not produce ten separate cleanups.
 
 This gives a safety property: cleanup executes once through ordinary controlled flow, with resources still valid. It also gives a conditional progress property: after a supported request and readiness, the receiver eventually reaches cleanup if it gets execution time and its remaining operations complete. Whether cleanup itself can block indefinitely is a separate design question.
 
@@ -24,9 +24,17 @@ Predict the dangerous intervals. What happens if the controller sends before rea
 
 ## Distinguish the operating-system rules
 
-POSIX signals provide notifications with several separate controls. A signal's **disposition** specifies its delivery action: default behavior, ignoring, or a handler. A thread's **mask** specifies blocked signals. A generated blocked signal can remain **pending** until it is accepted or unblocked. Blocking therefore preserves a different policy from ignoring. [Signal concepts](https://man7.org/linux/man-pages/man7/signal.7.html)
+POSIX signals provide notifications with three separate controls:
 
-These are supplied interface rules. We cannot derive their exact shape from processor hardware, and we should not substitute an intuitive meaning for a specified one. In particular, ordinary signals can coalesce: several occurrences of one signal need not become several independently countable events. That fits our idempotent stop request but would fail a requirement to count every submitted job.
+| Concept | Question it answers |
+| --- | --- |
+| **Disposition** | What happens on delivery: the default action, ignoring, or a handler? |
+| **Mask** | Which signals does this thread block from ordinary delivery? |
+| **Pending state** | Which generated signals are still waiting to be delivered or accepted? |
+
+For a blocked signal whose disposition is not ignore, pending state remembers the notification. Ignoring a signal does not provide that guarantee. These controls explain how we can defer a stop request without discarding it. [POSIX signal generation and delivery](https://pubs.opengroup.org/onlinepubs/9799919799/functions/V2_chap02.html)
+
+Ordinary signals can **coalesce**: several occurrences of one signal need not become several separately countable events. That fits our idempotent stop request but would fail a requirement to count every submitted job. A signal number identifies a notification type; it does not identify one unique request.
 
 Our chosen notifications are `SIGINT` and `SIGTERM`. Their symbolic names express the source-level interface; raw numeric values should not become a portable protocol. `SIGKILL` and `SIGSTOP` cannot be caught, blocked, or ignored. Consequently, the service's cleanup guarantee must be conditional on the supported termination path. [Signal dispositions and restrictions](https://man7.org/linux/man-pages/man7/signal.7.html)
 
@@ -43,13 +51,13 @@ The observed delay cannot establish a deadline guarantee. If shutdown must finis
 
 Work backward from a proposed requirement: “exit within five seconds, after uploading final metrics and saving all pending work.” Suppose the upload must await a remote reply, with no bound on when that reply arrives. Those requirements cannot jointly supply the deadline. Faster signal handling cannot bound an unbounded dependency after acceptance.
 
-First ask which results are essential. If the metrics upload is optional, remove it from the required shutdown path or give it an explicit abandonment policy. If saving pending work is mandatory, its duration still needs a bound or the deadline needs revision; a timeout cannot manufacture saved data. Only then choose a waiting mechanism. To investigate an uncertain dependency, make the metrics receiver withhold its reply and observe which shutdown state stalls. That experiment can disprove a claimed deadline for that path. One prompt reply cannot prove the deadline for all runs.
+If the metrics upload is optional, specify when it may be abandoned. If saving pending work is mandatory, its duration needs a bound or the deadline needs revision. Test the dependency by making the metrics receiver withhold its reply: that can expose an unbounded cleanup path, even when signal acceptance works correctly.
 
 ## Compare two viable ways to receive the event
 
 One design installs a minimal handler that records a flag. Ordinary code inspects the flag and performs cleanup. Waiting must coordinate the flag check with signal delivery; otherwise it can miss the transition that should wake it.
 
-A second design blocks the selected signals and accepts one synchronously with `sigwait()`. After the function returns, normal code can process the result. For this program, whose only job is to await shutdown, that design needs no user-maintained request flag: the operating system's pending state and the program's control flow provide the necessary state.
+A second design blocks the selected signals and accepts one synchronously with `sigwait()`. “Synchronously” means the program receives the signal as the result of a call at a chosen point in its control flow; no handler runs for that acceptance. For this program, whose only job is to await shutdown, the operating system's pending state replaces a user-maintained request flag.
 
 | Design | Main benefit | Obligation it introduces |
 | --- | --- | --- |
@@ -87,9 +95,33 @@ Our receiver first blocks `SIGINT` and `SIGTERM`, establishes dispositions, and 
 | While waiting | Acceptance lets the call return with the selected signal. |
 | During cleanup | Selected signals remain blocked; this one-shot design does not start cleanup again. |
 
-The key invariant is that the selected signals remain blocked throughout the announced interval. Readiness is therefore evidence of a completed state transition, not a statement about elapsed startup time. A sleep in the controller could only estimate that transition.
+The key invariant is that the selected signals remain blocked throughout the announced interval. `sigwait()` accepts a selected pending signal while it is blocked; there is no need to unblock it first. Readiness reports that the receiver has established this policy. A sleep in the controller could only estimate when that happened.
 
 `sigwait()` returns zero on success and places the signal number in its output parameter. Its error result is an error number directly, rather than a `-1` result whose explanation must be read from `errno`. Handling it like `read()` would mix two contracts. [POSIX `sigwait` specification](https://man7.org/linux/man-pages/man3/sigwait.3p.html)
+
+### Let the request arrive at the awkward moment
+
+Assume one `SIGTERM` request and successful setup. Deliberately delay the receiver after its controller has read the readiness line but before the receiver calls `sigwait()`. The delay need not have any particular duration; the following order is enough:
+
+| Step | Receiver or controller action | Receiver's signal state |
+| --- | --- | --- |
+| 1 | Receiver blocks the selected set and establishes default dispositions. | `SIGTERM` blocked; none pending. |
+| 2 | Receiver flushes readiness; controller reads it. | Policy established; receiver need not be waiting yet. |
+| 3 | Controller sends `SIGTERM`. | `SIGTERM` blocked and pending. |
+| 4 | Receiver eventually calls `sigwait()`. | The call accepts the pending signal. |
+| 5 | Receiver enters cleanup after a successful return. | `SIGTERM` still blocked; the accepted occurrence is no longer pending. |
+
+The controller does not need evidence that step 4 has begun. Evidence of step 2 is enough because pending state bridges the interval. Compare the broken flag-and-`pause()` loop: there, delivery consumes the event before the wait begins, and `pause()` has no reason to inspect the flag. Here, acceptance and observation of the request are one interface operation.
+
+Blocking also protects the cleanup path from a second supported request. If another `SIGTERM` arrives during cleanup, it can become pending again, but it does not start another cleanup or take its default action while blocked. This program keeps the mask in place through normal termination. In a reusable component, restoring a caller's mask would require a separate policy for pending requests.
+
+**Predict:** just before step 4, the receiver decides to “let the signal through” by unblocking `SIGTERM`. What happens to the pending request under its default disposition? Does `sigwait()` require that unblocking step?
+
+:::reveal Review the arrival trace
+
+Unblocking allows ordinary delivery of the pending `SIGTERM`, whose default action terminates the process. The receiver can lose its intended cleanup path before reaching the wait. `sigwait()` instead requires the selected signals to be blocked and accepts one directly. Blocking is what makes the waiting protocol work; it is not an obstacle to remove before acceptance.
+
+:::
 
 Before opening the reference implementation, write the three operations “block, announce, accept” and justify each ordering edge. Include the flush in your explanation: output buffered only in the receiver's memory cannot yet serve as evidence for another process.
 
@@ -101,7 +133,7 @@ Before opening the reference implementation, write the three operations “block
 
 The program restores default dispositions while the signals are blocked. A background shell command can inherit an ignored `SIGINT`; resetting that disposition avoids depending on inherited ignore behavior. This does not deliver a blocked signal immediately. Disposition and mask are separate controls. [POSIX signal actions](https://man7.org/linux/man-pages/man3/sigaction.3p.html)
 
-After acceptance, `printf()` is ordinary program work, not a handler call. The example has no application resource to release, so its cleanup consists of finishing the normal path and stream handling. A real service would fill this position with an explicit resource order: stop accepting work, settle owned work, then release resources still needed by that work. Reporting “cleanup complete” would not itself prove the process has exited; a supervising parent still collects completion.
+After `sigwait()` returns, `printf()` runs in ordinary control flow, where the handler restrictions do not apply. The example has no application resource to release, so its cleanup consists of finishing the normal path and checking its output stream. A real service needs an explicit order: stop accepting new work, finish or abandon existing work according to its contract, then release the resources that work used. Reporting “cleanup complete” does not itself prove the process has exited; a supervising parent still collects completion.
 
 ## Test a synchronization claim, not a timing guess
 
@@ -135,7 +167,7 @@ Finally, inherited masks can survive execution. A launcher that changes its own 
 ## Exercises
 
 1. **Repair the counterexample.** Describe a handler-and-wait solution in terms of when the selected signal is blocked, when the flag is tested, and how the wait changes the mask. Explain both the safety and progress obligations.
-2. **Test a different notification meaning.** Add a conceptual `SIGUSR1` status request. Would one output line for every ten rapidly sent requests be guaranteed? Compare a signal with a framed control pipe if every request must receive a distinct reply.
+2. **Test a different notification meaning.** Add a conceptual `SIGUSR1` status request. Would ten rapidly sent requests guarantee ten separate replies? Compare a signal with a framed control pipe if every request must receive a distinct reply.
 3. **Transfer: keep work running.** Change the program so worker threads continue processing while shutdown is awaited. State who owns the mask policy, how the stop decision reaches workers, and when shared resources may be released.
 
 **Write your version.** Explain why a request can be safely remembered yet still fail to produce progress. Use the lost-wakeup trace and the readiness protocol as two different examples of ordering that must be designed.

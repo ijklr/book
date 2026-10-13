@@ -1,6 +1,6 @@
 # Chapter 13 — Build and finish a streaming search tool
 
-You need to find which lines of an input contain a literal pattern. The input can exceed memory; a single line can also exceed memory. Bytes may arrive in arbitrary groups, including a group ending halfway through the pattern. A caller needs a useful result even when a later file cannot be read, and a reliable indication that some work failed.
+You need to find which lines of an input contain a literal pattern: an exact sequence of bytes, with no regular-expression syntax. The input can exceed memory; a single line can also exceed memory. Bytes may arrive in arbitrary groups, including a group ending halfway through the pattern. A caller needs the matches found before a later file fails, together with a reliable indication that the search was incomplete.
 
 These constraints do not yet name an algorithm. Start by identifying information that a future decision needs. If a read ends with `nee` while the pattern is `needle`, forgetting that suffix makes the next `dle` indistinguishable from an unrelated beginning. Some information must survive the read. Whether you retain bytes, candidate positions, or a compact state is a design choice to investigate.
 
@@ -25,7 +25,7 @@ Suppose the initial design says, “Allocate a growing buffer for each line, the
 
 Change the promise to printing every matching line in full, with no bytes from nonmatching lines in the output. Now consider a nonseekable stream whose enormous first line has its only match near the end. Until that match appears, the program cannot know whether to emit the earlier bytes. Once it appears, it must reproduce them. A single pass therefore needs some way to retain an arbitrarily long prefix in the worst case. A more clever growth factor cannot remove that information requirement.
 
-Possible revisions include a line-length limit, temporary-file storage, or rereading a stable seekable input. Each changes a resource or input assumption. Reporting line numbers removes the retention requirement only because it is the agreed output contract. Write down that agreement before celebrating the smaller buffer: removing necessary output would solve a different problem.
+Possible revisions include a line-length limit, temporary-file storage, or rereading a stable seekable input. Each changes a resource or input assumption. Reporting line numbers removes the retention requirement only because it is the agreed output contract. The smaller buffer is justified by the information the caller needs, not by silently dropping part of the requested output.
 
 ## Define the command before the algorithm
 
@@ -45,7 +45,7 @@ Each matching line produces one output record:
 label:line-number
 ```
 
-Line numbers start at 1. A newline byte ends a line. Carriage return is an ordinary byte, so CRLF input includes a carriage return just before each newline. A final line needs no newline to be searched. The program reports a line once even if the pattern occurs several times within it.
+Line numbers start at 1 for each input. A newline byte ends a line. Carriage return is an ordinary byte, so CRLF input includes a carriage return just before each newline. A final line needs no newline to be searched. The program reports a line as soon as its first match is found, without waiting for a newline or EOF. Empty input and empty lines cannot match a nonempty pattern.
 
 Labels are escaped byte by byte. A colon, backslash, control byte, or non-ASCII byte appears as `\xHH`. This keeps filenames containing colons or newlines from changing the output structure. It is a display format, not a Unicode-aware filename presentation. Standard input uses the fixed label `(stdin)`.
 
@@ -103,9 +103,20 @@ Compare three useful candidates. Let `M` be pattern length and `L` the longest l
 
 The suffix-window design is a legitimate solution to the memory requirement. We choose the third because it also gives a useful bound on matching work. Memory constraints motivate persistent state; the additional cost goal motivates how that state is represented.
 
-At a byte-processing boundary before reporting a line, `matched` records the length of the **longest** pattern prefix that is also a suffix of the bytes examined on that line. For pattern `needle`, after input `xnee`, that length is 3. The next byte `d` increases it to 4. A mismatch may reduce it; a read boundary does not change it. This statement is the state invariant to preserve, not merely an interpretation of a variable name.
+Before a line has been reported, `matched` records the length of the **longest** pattern prefix that is also a suffix of the bytes examined on that line. For pattern `needle`, input `xnee` leaves `matched == 3`: the suffix `nee` is a possible beginning of the pattern. The next byte `d` increases it to 4. A mismatch may reduce it; returning from one read and beginning another leaves it unchanged. Each byte-processing transition must preserve this invariant.
 
-The matcher also needs the current line number and a Boolean saying whether that line has already been reported. Once a line is reported, further bytes on that line require only newline detection. A newline resets the prefix state and the reported flag, then advances the line counter. This deliberate reset prevents a pattern from spanning two lines.
+The matcher also needs the current line number and a Boolean saying whether that line has already been reported. These three values summarize the input history relevant to the next report:
+
+| Event | Required transition |
+| --- | --- |
+| Non-newline byte on an unreported line | Update the longest matching prefix; report if it becomes a complete match |
+| Non-newline byte on an already reported line | Skip matching; this line needs no second report |
+| Newline | Advance the checked line counter; clear prefix progress and the reported flag |
+| End of a read | Preserve all three values for the next chunk |
+| EOF | Finish this input; no delayed match report is needed |
+| Start of another input | Reset to line 1, no matched prefix, and no report |
+
+The newline reset is justified by the ban on newline bytes in a pattern. Without that restriction, the reset could discard a valid match crossing a line boundary.
 
 The line counter uses `uintmax_t`. It is large, but it is still finite. The implementation rejects an increment that would overflow. Size limits are part of the contract even when reaching them would be impractical in an ordinary session.
 
@@ -121,21 +132,54 @@ pattern byte:  a b a b a c
 prefix length: 0 0 1 2 3 0
 ```
 
-Each table entry is the length of the longest proper prefix that is also a suffix of the pattern through that position. “Proper” means shorter than the whole sequence under consideration. If `k` bytes matched and the next byte disagrees, the next viable shorter candidate must itself be a suffix of those `k` bytes. It must also be a prefix of the pattern. That is precisely the relation the table records. Repeating the fallback considers progressively shorter candidates without rereading old input.
+Each table entry describes the pattern prefix ending at that position: it gives the length of the longest shorter prefix that is also its suffix. For `ababa`, that shorter prefix and suffix is `aba`, of length 3. Such a shorter prefix is called a **proper prefix**. On a mismatch with `k > 0` bytes already matched, entry `k - 1` identifies the longest shorter candidate. It must be both a suffix of the bytes already matched and a prefix of the pattern. Repeating this lookup considers progressively shorter candidates without rereading old input.
+
+We can derive the table instead of accepting it as an input. For each growing pattern prefix, look for its longest proper prefix that also appears at the end:
+
+| Prefix considered | Longest matching proper prefix and suffix | Table entry |
+| --- | --- | --- |
+| `a` | Empty | 0 |
+| `ab` | Empty | 0 |
+| `aba` | `a` | 1 |
+| `abab` | `ab` | 2 |
+| `ababa` | `aba` | 3 |
+| `ababac` | Empty | 0 |
+
+The constructor avoids searching every possible suffix afresh. For index `i >= 1`, start with `k = prefix[i - 1]`. Those `k` bytes already match at both ends of the previous prefix. If the new byte equals `pattern[k]`, the match extends by one. On a mismatch with `k > 0`, `prefix[k - 1]` names the next shorter candidate, using an entry already computed.
+
+For the final `c`, start at `k == 3`: the next expected byte is `pattern[3]`, or `b`. That fails. Fall back to `prefix[2] == 1`; `pattern[1]` is also `b`. Fall back again to `prefix[0] == 0`; `c` does not match `pattern[0]`, or `a`. Store zero. The constructor and the input scanner reuse the same relationship between prefixes and suffixes.
+
+Predict the final entry if the pattern is `ababaa` instead. Does reaching candidate length zero always force the entry to zero?
+
+:::reveal Review the table construction
+
+The final entry is 1. The incoming `a` still causes the fallbacks from 3 to 1 to 0, but now it matches `pattern[0]`, creating a one-byte prefix. Zero is the length before comparing this byte, not an instruction to discard it. The full table is `0, 0, 1, 2, 3, 1`.
+
+:::
 
 The argument explains why simply setting `matched` to zero on every mismatch is incomplete: a nonempty suffix may remain a valid beginning. It also explains why subtracting one is insufficient as a complete rule: not every shorter suffix is a pattern prefix. You could check those suffixes directly, but precomputing their relationships avoids repeating that work.
 
-Trace the mismatch above. With five bytes matched, consult table entry 4 and keep three. The incoming `b` agrees with pattern position 3, bringing the matched length to four. The remaining input is `a,b,a,c`: the first `a` brings the length to five, the next `b` requires the same fallback and leaves four, and the final `a,c` bring it to five and then six. No previous input bytes need to remain in memory.
+Trace the mismatch above. The first five input bytes, `ababa`, leave five bytes matched. Continue with:
+
+| Input index | Incoming byte | Matched length before | Action | Matched length after |
+| --- | --- | --- | --- | --- |
+| 5 | `b` | 5 | Fall back using entry 4 to length 3; compare the same `b` again | 4 |
+| 6 | `a` | 4 | Extend the prefix | 5 |
+| 7 | `b` | 5 | Fall back to 3; compare the same `b` again | 4 |
+| 8 | `a` | 4 | Extend the prefix | 5 |
+| 9 | `c` | 5 | Complete the pattern and report line 1 | 6, then reset to 0 |
+
+Fallback changes the candidate prefix without consuming the incoming byte. Advancing to the next input byte during fallback would lose a possible match. The matching occurrence occupies indices 4 through 9; no earlier input bytes need to remain in memory. For the earlier input `ababababac\nno match\nababac`, the reports are lines 1 and 3 under either proposed read division.
 
 This is the central idea of the Knuth–Morris–Pratt family of string-matching algorithms. The useful property is that total matching work grows linearly with input length plus pattern length: each input step increases the matched length by at most one, and fallback steps reduce progress previously accumulated. Account for both increases and decreases across the whole input rather than multiplying a worst-looking inner loop by every byte. The table has one entry per pattern byte; its construction admits the same style of accounting.
 
 This bound concerns matching, not all costs of running the command. Formatting and writing each label also takes work, and an output operation can wait on an external consumer. An algorithmic bound does not establish a wall-clock deadline.
 
-Together, the pattern copy, prefix table, fixed 8192-byte input buffer, and small state use memory proportional to the pattern length. A line can be enormous without requiring a line-sized allocation. Output volume still has a cost; reporting millions of short matching lines is different work from finding one match on a huge line.
+For a pattern of `M` bytes, the matcher allocates `M` bytes for its copy and `M * sizeof(size_t)` bytes for the prefix table, plus one fixed-size state object. The application adds an 8192-byte input buffer and bounded stdio storage. These costs are independent of the input and line lengths. Output volume still has a cost; reporting millions of short matching lines is different work from finding one match on a huge line.
 
 ## Separate matching from operating-system work
 
-The matcher never opens files or writes to standard output. It calls an application-supplied function when it finds a matching line. This separates a deterministic state machine from operations that can block or fail for external reasons.
+The matcher never opens files or writes to standard output. It calls an application-supplied callback when it finds a matching line. The same matching logic can therefore report line numbers, count matches, or record test events. The callback owns the output behavior and can block or fail, so its contract is part of the matcher's progress argument.
 
 The application creates one matcher, feeds it bytes, resets it between inputs, and destroys it once. The matcher copies the pattern, so it owns that memory independently of the caller. Input buffers are borrowed only during `matcher_feed` and must remain unchanged until it returns. A callback receives the line number by value and a caller-owned context pointer. It must not feed, reset, or destroy the active matcher: same-thread callback reentry can invalidate state or lifetime even without a thread data race. Calls on a different matcher are allowed.
 
@@ -149,9 +193,19 @@ search_fd borrows matcher + descriptor
 main closes owned input descriptors and destroys matcher
 ```
 
-The public header expresses the contracts that a caller needs. The structure definition stays private in `matcher.c`, allowing the representation to change without changing callers. After a callback or feed error, callers must reset or destroy the matcher; the API does not promise resumability after failure.
+The public header expresses the contracts that a caller needs. The structure definition stays private in `matcher.c`, allowing the representation to change without changing callers. After a feed or callback error, callers must reset or destroy the matcher. Resetting starts a new input; it does not resume the failed feed or undo output already accepted by the callback.
 
-Before opening the interface, write down which failure leaves a resumable operation and which failure ends it. This reference chooses a simple rule: reset or destroy after a feed or callback failure. It does not attempt to undo output already accepted by the callback.
+Trace pattern `aba` through three feeds: `ab`, then `aaba\nab`, then `a`. Predict each callback's line number and the state left after the second feed. Assume callbacks succeed, then reconsider a failure at the first callback.
+
+:::reveal Review the line and callback trace
+
+The first feed leaves two bytes matched on line 1. The first byte of the second feed completes `aba` and reports line 1. Its remaining `aba` is skipped because that line is already reported. The newline resets reporting and matching; the final `ab` leaves two bytes matched on line 2. The third feed reports line 2 immediately. EOF adds no report.
+
+If the first callback fails, the second feed stops before processing its remaining `aba\nab`. The API returns failure without a consumed-byte count, and the callback may have produced partial output. Feeding the same chunk again cannot safely resume the operation. The reset-or-destroy rule gives callers a defined response to that uncertainty.
+
+:::
+
+Before opening the interface, explain what a caller would need to know to resume after an output pause: which input bytes were consumed and whether the current match was accepted. The reference API does not report that progress. Appendix E's callback exercise asks you to design the stronger contract.
 
 :::reveal Reference interface — capstone/matcher.h
 
@@ -161,11 +215,11 @@ Before opening the interface, write down which failure leaves a resumable operat
 
 ## Implement the state machine
 
-The constructor validates the pattern before allocation. It checks each allocation immediately and preserves `errno` before cleanup. Successful library calls are not a safe place to keep a previous error code. Destruction accepts a null pointer, making constructor cleanup simple. The structure assignment from `(struct matcher){0}` establishes null pointer members explicitly through C initialization rules; zero-filled allocation alone is not a portable promise of null pointer representations. [C committee draft, initialization and `calloc`](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf).
+The constructor validates the pattern before allocation, including checking that `n * sizeof(size_t)` cannot overflow. It checks each allocation immediately and preserves `errno` before cleanup, because cleanup may change it. Destruction accepts a null pointer, making constructor cleanup simple. The structure assignment from `(struct matcher){0}` initializes pointer members to null pointers through C's initialization rules; the all-zero bytes supplied by `calloc` alone do not guarantee that pointer value on every C implementation. See sections 6.7.9 and 7.22.3.2 of the [C committee draft](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf).
 
 The implementation stores pattern bytes without a terminating zero because every access is bounded by the recorded length. Its representation is a byte sequence, not a C string. Only the constructor accepts the caller's C-string representation.
 
-Read the following source with the invariant beside you: outside a complete-match event, `matched` is smaller than the pattern length. When the lengths become equal, the code reports the line and resets `matched` before processing another byte. That prevents the next comparison from indexing beyond the pattern.
+Read the following source with the invariant beside you: before each pattern comparison, `matched` is smaller than the pattern length. When the lengths become equal, the code marks the line reported and resets `matched` before invoking the callback. The next comparison therefore cannot index beyond the pattern. If the callback fails, those state changes have already happened; the caller must reset or destroy the matcher, as the interface requires.
 
 :::reveal Reference implementation — capstone/matcher.c
 
@@ -201,7 +255,7 @@ The command has additional dependencies: blocking reads need input or EOF, and b
 
 Run `make test`. The matcher-specific C test forces different chunk boundaries in the same data. The Python suite compares whole-program results with an independent byte-string oracle. It places matches around the 8192-byte input-buffer capacity, although pipe delivery does not force a particular read division. It also checks embedded zero bytes, long lines, the maximum pattern length, invalid patterns, input errors, escaped filenames, standard input, and broken output.
 
-The tests do not make every failure physically happen. They do not exhaust available memory, simulate every filesystem, or prove the absence of races in an unrelated program. Their value comes from the connection between each case and a promised behavior. Read `tests/test_matcher.c` and `tests/check.py` as an executable companion to the contract.
+The tests connect specific cases to promised behavior; they do not exercise every resource failure. Allocation failure and line-counter overflow, for example, need controlled fault injection or a test seam to reach reliably. Read `tests/test_matcher.c` and `tests/check.py` as an executable companion to the contract, and identify which claims are tested directly and which still rely on inspection and reasoning.
 
 The program is deliberately sequential. Input files can change while being read, so results describe the bytes observed rather than a coherent filesystem snapshot. Blocking input may wait indefinitely for more data. It has no recursive directory walk, regular expressions, Unicode case folding, or parallel execution. Those are specific possible extensions, each with design work of its own.
 
